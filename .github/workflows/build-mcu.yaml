@@ -46,8 +46,8 @@ jobs:
           path: result/*
 
   build-32bit:
-    using: "docker"
-    image: "i386/debian"
+    runs-on: ubuntu-latest
+    container: i386/debian
     steps:
       - uses: actions/checkout@v4
 
