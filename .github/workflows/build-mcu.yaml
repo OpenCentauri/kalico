@@ -1,0 +1,44 @@
+name: Build MCU
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          mkdir result
+
+      - name: Build SKR MCU
+        run: |
+          cp mcu/skr-mini-v3-config .config
+          make
+          cp out/klipper.bin result/skr-mini-v3.bin
+          make clean
+      
+      - name: Build Hotend MCU
+        run: |
+          cp mcu/hotend-config .config
+          make
+          cp out/klipper.bin result/hotend.bin
+          make clean
+      
+      - name: Build Bed MCU
+        run: |
+          cp mcu/bed-config .config
+          make
+          cp out/klipper.bin result/bed.bin
+          make clean
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcu-binaries
+          path: result/*
