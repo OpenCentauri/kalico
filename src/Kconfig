@@ -32,6 +32,8 @@ choice
         bool "Linux process"
     config MACH_SIMU
         bool "Host simulator"
+    config MACH_ALLWINNER_R528
+        bool "Centauri Carbon host board"
 endchoice
 
 source "src/avr/Kconfig"
@@ -45,7 +47,7 @@ source "src/pru/Kconfig"
 source "src/ar100/Kconfig"
 source "src/linux/Kconfig"
 source "src/simulator/Kconfig"
-
+source "src/aw_r528/Kconfig"
 # Generic configuration options for serial ports
 config SERIAL
     bool
