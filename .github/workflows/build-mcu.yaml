@@ -62,7 +62,7 @@ jobs:
       - name: Copy
         run: |
           cp out/klipper.elf result/32bit.elf
-          make clean
+          sudo make clean
       
       - uses: actions/upload-artifact@v4
         with:
