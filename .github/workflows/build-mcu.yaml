@@ -47,20 +47,20 @@ jobs:
 
   build-32bit:
     runs-on: ubuntu-latest
-    container: i386/debian
     steps:
+      - uses: actions/checkout@v4
+    
       - name: Setup
         run: |
           mkdir result
-          apt update
-          apt install -y sudo git curl python3 python3-dev python3-venv libffi-dev build-essential gcc-avr avr-libc libnewlib-arm-none-eabi gcc-arm-none-eabi binutils-arm-none-eabi nodejs npm
-
-      - uses: actions/checkout@v4
-
-      - name: Build Linux process
-        run: |
           cp mcu/process-config .config
-          make
+
+      - name: Make in container
+        run: |
+          docker run -it -v $(pwd):/build --rm i386/debian /bin/bash -c "apt update && apt install -y sudo git curl python3 python3-dev python3-venv libffi-dev build-essential gcc-avr avr-libc libnewlib-arm-none-eabi gcc-arm-none-eabi binutils-arm-none-eabi && cd /build && make"
+
+      - name: Copy
+        run: |
           cp out/klipper.elf result/32bit.elf
           make clean
       
