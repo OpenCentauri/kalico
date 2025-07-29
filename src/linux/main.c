@@ -3,7 +3,7 @@
 // Copyright (C) 2017  Kevin O'Connor <kevin@koconnor.net>
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
-
+#define _GNU_SOURCE
 #include <errno.h> // errno
 #include <sched.h> // sched_setscheduler sched_get_priority_max
 #include <stdio.h> // fprintf
@@ -36,6 +36,18 @@ realtime_setup(void)
         report_errno("sched_setscheduler", ret);
         return -1;
     }
+
+    // Lock to core 0
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+
+    ret = sched_setaffinity(0, sizeof(cpuset), &cpuset);
+    if (!ret) {
+        report_errno("shed_setaffinity", ret);
+        return -1;
+    }
+
     // Lock ourselves into memory
     ret = mlockall(MCL_CURRENT | MCL_FUTURE);
     if (ret) {

@@ -46,22 +46,23 @@ jobs:
           path: result/*
 
   build-32bit:
-    using: "docker"
-    image: "i386/debian"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+    
       - name: Setup
         run: |
           mkdir result
           sudo apt update
-          sudo apt install -y sudo git curl python3 python3-dev python3-venv libffi-dev build-essential gcc-avr avr-libc libnewlib-arm-none-eabi gcc-arm-none-eabi binutils-arm-none-eabi
+          sudo apt install -y sudo git curl wget python3 python3-dev python3-venv libffi-dev build-essential gcc-avr avr-libc libnewlib-arm-none-eabi gcc-arm-none-eabi binutils-arm-none-eabi
+          tar xf ./lib/armv7l-linux-musleabihf-cross.tgz
 
-      - name: Build Linux process
+      - name: Build linux process
         run: |
+          export PATH=$PWD/armv7l-linux-musleabihf-cross/bin:$PATH
           cp mcu/process-config .config
-          make
-          cp out/klipper.elf result/32bit.elf
+          make CC="armv7l-linux-musleabihf-gcc -static" OBJCOPY=armv7l-linux-musleabihf-objcopy
+          cp out/klipper.elf result/linux.elf
           make clean
       
       - uses: actions/upload-artifact@v4
