@@ -46,6 +46,7 @@ class Heater:
         self.configfile = self.printer.lookup_object("configfile")
         # Setup sensor
         self.sensor = sensor
+        self.mpc_sensors = []
         self.min_temp = config.getfloat("min_temp", minval=KELVIN_TO_CELSIUS)
         self.max_temp = config.getfloat("max_temp", above=self.min_temp)
         self.sensor.setup_minmax(self.min_temp, self.max_temp)
@@ -180,6 +181,8 @@ class Heater:
                 self.smoothed_temp >= self.min_extrude_temp or self.cold_extrude
             )
         # logging.debug("temp: %.3f %f = %f", read_time, temp)
+        for mpc_sensor in self.mpc_sensors:
+            mpc_sensor.process_temp_update(self.get_control(), read_time)
 
     def _handle_shutdown(self):
         self.verify_mainthread_time = -999.0
@@ -187,6 +190,9 @@ class Heater:
     # External commands
     def get_name(self):
         return self.name
+
+    def add_mpc_sensor(self, mpc_sensor):
+        self.mpc_sensors.append(mpc_sensor)
 
     def get_pwm_delay(self):
         return self.pwm_delay
