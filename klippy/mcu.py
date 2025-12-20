@@ -7,7 +7,8 @@ import logging
 import math
 import os
 import zlib
-from . import serialhdl, msgproto, pins, chelper, clocksync
+
+from . import chelper, clocksync, msgproto, pins, serialhdl
 from .extras.danger_options import get_danger_options
 
 
@@ -1217,6 +1218,12 @@ class MCU:
         self._get_status_info["mcu_version"] = version
         self._get_status_info["mcu_build_versions"] = build_versions
         self._get_status_info["mcu_constants"] = msgparser.get_constants()
+        if app in ("Klipper", "Danger-Klipper"):
+            pconfig = self._printer.lookup_object("configfile")
+            pconfig.runtime_warning(
+                f"MCU {self._name!r} currently has firmware compiled for {app} (version {version})."
+                f" It is recommended to re-flash for best compatiblity with Kalico"
+            )
         self.register_response(self._handle_shutdown, "shutdown")
         self.register_response(self._handle_shutdown, "is_shutdown")
         self.register_response(self._handle_mcu_stats, "stats")

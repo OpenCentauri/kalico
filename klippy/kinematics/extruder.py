@@ -3,8 +3,11 @@
 # Copyright (C) 2016-2022  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import math, logging
-from klippy import stepper, chelper
+import logging
+import math
+
+from klippy import chelper, stepper
+
 from ..extras.danger_options import get_danger_options
 
 
@@ -250,6 +253,7 @@ class PrinterExtruder:
             toolhead.set_extruder(self, 0.0)
             gcode.register_command("M104", self.cmd_M104)
             gcode.register_command("M109", self.cmd_M109)
+            gcode.register_command("M302", self.cmd_M302)
         gcode.register_mux_command(
             "ACTIVATE_EXTRUDER",
             "EXTRUDER",
@@ -381,6 +385,24 @@ class PrinterExtruder:
     def cmd_M109(self, gcmd):
         # Set Extruder Temperature and Wait
         self.cmd_M104(gcmd, wait=True)
+
+    def cmd_M302(self, gcmd):
+        index = gcmd.get_int("T", None, minval=0)
+        if index is not None:
+            section = "extruder"
+            if index:
+                section = "extruder%d" % (index,)
+            extruder = self.printer.lookup_object(section, None)
+            if extruder is None:
+                raise gcmd.error("Extruder%d not configured", (index,))
+        else:
+            extruder = self.printer.lookup_object("toolhead").get_extruder()
+        heater = extruder.get_heater()
+        cold_extrude = gcmd.get_int("P", None, minval=0, maxval=1)
+        min_extrude_temp = gcmd.get_float(
+            "S", None, minval=heater.min_temp, maxval=heater.max_temp
+        )
+        heater.set_cold_extrude(cold_extrude, min_extrude_temp)
 
     cmd_ACTIVATE_EXTRUDER_help = "Change the active extruder"
 

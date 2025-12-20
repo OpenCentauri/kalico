@@ -1,5 +1,5 @@
-import math
 import logging
+import math
 
 AMBIENT_TEMP = 25.0
 PIN_MIN_TIME = 0.100
@@ -362,6 +362,8 @@ class ControlMPC:
             "loss_ambient": self.last_loss_ambient,
             "loss_filament": self.last_loss_filament,
             "filament_temp": self.filament_temp_src,
+            "filament_heat_capacity": self.const_filament_heat_capacity,
+            "filament_density": self.const_filament_density,
         }
 
 
