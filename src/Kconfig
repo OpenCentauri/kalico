@@ -28,6 +28,8 @@ choice
         bool "Beaglebone PRU"
     config MACH_AR100
         bool "Allwinner A64 AR100"
+    config MACH_HIFI4
+        bool "HIFI4 DSP"
     config MACH_LINUX
         bool "Linux process"
     config MACH_SIMU
@@ -43,6 +45,7 @@ source "src/hc32f460/Kconfig"
 source "src/rp2040/Kconfig"
 source "src/pru/Kconfig"
 source "src/ar100/Kconfig"
+source "src/hifi4/Kconfig"
 source "src/linux/Kconfig"
 source "src/simulator/Kconfig"
 

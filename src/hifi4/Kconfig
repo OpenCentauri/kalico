@@ -1,0 +1,40 @@
+# Kconfig settings for HIFI4 DSP
+
+if MACH_HIFI4
+
+config BOARD_DIRECTORY
+    string
+    default "hifi4"
+
+config HIFI4_SELECT
+    bool
+    default y
+    select HAVE_GPIO
+    select HAVE_GPIO_ADC
+    select HAVE_GPIO_SPI
+    select HAVE_GPIO_HARD_PWM
+
+config CLOCK_FREQ
+    int
+    default 24000000
+
+choice
+    prompt "Communication Interface"
+    config HIFI4_MSGBOX
+        bool "MSGBOX"
+        select MSGBOX
+    config HIFI4_SERIAL_UART0
+        bool "UART0"
+        select SERIAL
+    config HIFI4_SERIAL_UART1
+        bool "UART1"
+        select SERIAL
+    config HIFI4_SERIAL_UART2
+        bool "UART2"
+        select SERIAL
+    config HIFI4_SERIAL_UART3
+        bool "UART3"
+        select SERIAL
+endchoice
+
+endif
