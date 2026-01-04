@@ -199,10 +199,10 @@ static const irq_handler_t uart_irq_handlers[4] = {
 };
 
 static const uint32_t uart_irq_nums[4] = {
-    IRQ_UART0,
-    IRQ_UART1,
-    IRQ_UART2,
-    IRQ_UART3,
+    INTC_UART0,
+    INTC_UART1,
+    INTC_UART2,
+    INTC_UART3,
 };
 
 void uart_set_rx_callback(uart_id_t uart_id, irq_handler_t callback, void *arg)
@@ -325,8 +325,8 @@ int uart_init(uart_id_t uart_id, const uart_config_t *config, uint32_t clk_freq)
     (void)uart_read_reg(uart_id, UART_MSR);
 
     /* Register the system IRQ handler */
-    irq_register(uart_irq_nums[uart_id], uart_irq_handlers[uart_id], NULL);
-    irq_enable_interrupt(uart_irq_nums[uart_id]);
+    intc_register(uart_irq_nums[uart_id], uart_irq_handlers[uart_id], NULL);
+    intc_enable(uart_irq_nums[uart_id]);
     
     return 0;
 }

@@ -227,18 +227,18 @@ void gpio_pg_irq_handler(uint32_t irq, void *arg)
 void gpio_init(void)
 {
     /* Register port interrupt handlers */
-    irq_register(IRQ_GPIO_PB, gpio_pb_irq_handler, NULL);
-    irq_register(IRQ_GPIO_PC, gpio_pc_irq_handler, NULL);
-    irq_register(IRQ_GPIO_PD, gpio_pd_irq_handler, NULL);
-    irq_register(IRQ_GPIO_PE, gpio_pe_irq_handler, NULL);
-    irq_register(IRQ_GPIO_PF, gpio_pf_irq_handler, NULL);
-    irq_register(IRQ_GPIO_PG, gpio_pg_irq_handler, NULL);
+    intc_register(INTC_GPIOB_NS, gpio_pb_irq_handler, NULL);
+    intc_register(INTC_GPIOC_NS, gpio_pc_irq_handler, NULL);
+    intc_register(INTC_GPIOD_NS, gpio_pd_irq_handler, NULL);
+    intc_register(INTC_GPIOE_NS, gpio_pe_irq_handler, NULL);
+    intc_register(INTC_GPIOF_NS, gpio_pf_irq_handler, NULL);
+    intc_register(INTC_GPIOG_NS, gpio_pg_irq_handler, NULL);
     
     /* Enable port interrupts at the system level */
-    irq_enable_interrupt(IRQ_GPIO_PB);
-    irq_enable_interrupt(IRQ_GPIO_PC);
-    irq_enable_interrupt(IRQ_GPIO_PD);
-    irq_enable_interrupt(IRQ_GPIO_PE);
-    irq_enable_interrupt(IRQ_GPIO_PF);
-    irq_enable_interrupt(IRQ_GPIO_PG);
+    intc_enable(INTC_GPIOB_NS);
+    intc_enable(INTC_GPIOC_NS);
+    intc_enable(INTC_GPIOD_NS);
+    intc_enable(INTC_GPIOE_NS);
+    intc_enable(INTC_GPIOF_NS);
+    intc_enable(INTC_GPIOG_NS);
 }

@@ -73,8 +73,8 @@ void watchdog_init(uint32_t timeout_ms, bool reset_on_timeout)
         
         /* Enable IRQ */
         wdog_write_reg(WDOG_IRQ_EN, BIT(0));
-        irq_register(IRQ_WATCHDOG, wdog_irq_handler, NULL);
-        irq_enable_interrupt(IRQ_WATCHDOG);
+        irq_register(IRQ_DSP_WDOG, wdog_irq_handler, NULL);
+        irq_enable_interrupt(IRQ_DSP_WDOG);
     }
     
     /* Clear any pending interrupt */

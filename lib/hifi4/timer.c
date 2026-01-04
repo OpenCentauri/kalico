@@ -179,10 +179,10 @@ void timer_start_oneshot(timer_id_t timer_id, uint32_t interval_us,
     /* Enable interrupt if handler provided */
     if (handler) {
         /* Register system IRQ handler */
-        uint32_t irq_num = (timer_id == TIMER_0) ? IRQ_TIMER0 : IRQ_TIMER1;
+        uint32_t irq_num = (timer_id == TIMER_0) ? INTC_TIMER0 : INTC_TIMER1;
         irq_handler_t sys_handler = (timer_id == TIMER_0) ? timer0_irq_handler : timer1_irq_handler;
-        irq_register(irq_num, sys_handler, NULL);
-        irq_enable_interrupt(irq_num);
+        intc_register(irq_num, sys_handler, NULL);
+        intc_enable(irq_num);
         
         /* Enable timer interrupt */
         uint32_t irq_en = timer_read_reg(TMR_IRQ_EN);
@@ -222,10 +222,10 @@ void timer_start_periodic(timer_id_t timer_id, uint32_t interval_us,
     
     /* Enable interrupt if handler provided */
     if (handler) {
-        uint32_t irq_num = (timer_id == TIMER_0) ? IRQ_TIMER0 : IRQ_TIMER1;
+        uint32_t irq_num = (timer_id == TIMER_0) ? INTC_TIMER0 : INTC_TIMER1;
         irq_handler_t sys_handler = (timer_id == TIMER_0) ? timer0_irq_handler : timer1_irq_handler;
-        irq_register(irq_num, sys_handler, NULL);
-        irq_enable_interrupt(irq_num);
+        intc_register(irq_num, sys_handler, NULL);
+        intc_enable(irq_num);
         
         uint32_t irq_en = timer_read_reg(TMR_IRQ_EN);
         irq_en |= timer_get_irq_bit(timer_id);

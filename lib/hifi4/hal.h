@@ -390,37 +390,88 @@ typedef enum {
  * Interrupt Handling
  *============================================================================*/
 
-/* HiFi4 DSP external interrupt numbers
- * Note: These are mapped through the DSP's interrupt controller
- * The actual mapping may vary - check your specific configuration
+/* HiFi4 DSP Interrupt Numbers (from DSP_CORE Interrupt Source table)
+ * 
+ * The HiFi4 DSP core has its own interrupt inputs. These are the interrupt
+ * numbers as they appear to the DSP core.
+ * 
+ * Note: The DSP uses a 2-level interrupt scheme for many peripherals:
+ * - Direct DSP core interrupts (e.g., TIMER0, TIMER1, HSTIMER0, HSTIMER1)
+ * - DSP_INTC routed interrupts (most peripherals go through IRQ 17)
+ * 
+ * For INTC-routed interrupts, the handler for IRQ 17 (INTC) should check
+ * DSP_INTC registers to determine which specific peripheral triggered it.
  */
-#define IRQ_TIMER0          75
-#define IRQ_TIMER1          76
-#define IRQ_HSTIMER0        87
-#define IRQ_HSTIMER1        88
-#define IRQ_WATCHDOG        79
-#define IRQ_UART0           18
-#define IRQ_UART1           19
-#define IRQ_UART2           20
-#define IRQ_UART3           21
-#define IRQ_TWI0            25
-#define IRQ_TWI1            26
-#define IRQ_TWI2            27
-#define IRQ_TWI3            28
-#define IRQ_SPI0            31
-#define IRQ_SPI1            32
-#define IRQ_PWM             34
-#define IRQ_GPADC           73
-#define IRQ_MSGBOX          78
-#define IRQ_GPIO_PB         85
-#define IRQ_GPIO_PC         87
-#define IRQ_GPIO_PD         89
-#define IRQ_GPIO_PE         91
-#define IRQ_GPIO_PF         93
-#define IRQ_GPIO_PG         95
+
+/* Direct DSP Core interrupts (directly wired to core) */
+#define IRQ_DSP_WDOG        13      /* DSP Watchdog */
+#define IRQ_DSP_TZMA        14      /* DSP TZMA */
+#define IRQ_HSTIMER0        15      /* High-speed timer 0 */
+#define IRQ_HSTIMER1        16      /* High-speed timer 1 */
+#define IRQ_INTC            17      /* External interrupt controller (DSP_INTC) */
+#define IRQ_TIMER0          18      /* Timer 0 */
+#define IRQ_TIMER1          19      /* Timer 1 */
+#define IRQ_GPADC           20      /* GPADC (named GPA in table) */
+#define IRQ_LRADC           21      /* LRADC */
+#define IRQ_TPADC           22      /* TPADC */
+
+/* DSP_INTC interrupt bit numbers (bits in DSP_INTC pending register)
+ * These are dispatched when IRQ_INTC (17) fires.
+ * Use with the INTC-specific handler.
+ */
+#define INTC_UART0          3
+#define INTC_UART1          4
+#define INTC_UART2          5
+#define INTC_UART3          6
+#define INTC_UART4          7
+#define INTC_UART5          8
+#define INTC_TWI0           10
+#define INTC_TWI1           11
+#define INTC_TWI2           12
+#define INTC_TWI3           13
+#define INTC_SPI0           16
+#define INTC_SPI1           17
+#define INTC_PWM            19
+#define INTC_IR_TX          20
+#define INTC_LEDC           21
+#define INTC_CAN0           22
+#define INTC_CAN1           23
+#define INTC_USB0_DEV       30
+#define INTC_USB0_EHCI      31
+#define INTC_USB0_OHCI      32
+#define INTC_USB1_EHCI      34
+#define INTC_USB1_OHCI      35
+#define INTC_SD0            41
+#define INTC_SD1            42
+#define INTC_SD2            43
+#define INTC_GMAC           47
+#define INTC_DMA_NS         51
+#define INTC_DMA_S          52
+#define INTC_CE_NS          53
+#define INTC_CE_S           54
+#define INTC_SPINLOCK       55
+#define INTC_TIMER0         59
+#define INTC_TIMER1         60
+#define INTC_WATCHDOG       64      /* System watchdog (not DSP watchdog) */
+#define INTC_IOMMU          65
+#define INTC_VE             67
+#define INTC_GPIOB_NS       70
+#define INTC_GPIOB_S        71
+#define INTC_GPIOC_NS       72
+#define INTC_GPIOC_S        73
+#define INTC_GPIOD_NS       74
+#define INTC_GPIOD_S        75
+#define INTC_GPIOE_NS       76
+#define INTC_GPIOE_S        77
+#define INTC_GPIOF_NS       78
+#define INTC_GPIOF_S        79
+#define INTC_GPIOG_NS       80
+#define INTC_GPIOG_S        81
+#define INTC_MSGBOX         86      /* CPUX_MSGBOX_DSP_W */
 
 /* Maximum number of external interrupts */
-#define MAX_IRQ_NUM         128
+#define MAX_IRQ_NUM         32      /* Direct DSP core interrupts */
+#define MAX_INTC_NUM        128     /* DSP_INTC peripheral interrupts */
 
 /* Interrupt handler callback type */
 typedef void (*irq_handler_t)(uint32_t irq, void *arg);
@@ -433,6 +484,73 @@ typedef void (*irq_handler_t)(uint32_t irq, void *arg);
  * @brief Initialize the HAL (clocks, interrupts, etc.)
  */
 void hal_init(void);
+
+/*============================================================================
+ * Function Prototypes - Direct DSP Core Interrupts
+ *============================================================================*/
+
+/**
+ * @brief Register handler for direct DSP core interrupt
+ * @param irq_num IRQ number (IRQ_TIMER0, IRQ_HSTIMER0, etc.)
+ * @param handler Handler function
+ * @param arg User argument passed to handler
+ */
+void irq_register(uint32_t irq_num, irq_handler_t handler, void *arg);
+
+/**
+ * @brief Unregister direct DSP core interrupt handler
+ */
+void irq_unregister(uint32_t irq_num);
+
+/**
+ * @brief Enable direct DSP core interrupt
+ */
+void irq_enable_interrupt(uint32_t irq_num);
+
+/**
+ * @brief Disable direct DSP core interrupt
+ */
+void irq_disable_interrupt(uint32_t irq_num);
+
+/**
+ * @brief Enable global interrupts
+ */
+void irq_global_enable(void);
+
+/**
+ * @brief Disable global interrupts
+ */
+void irq_global_disable(void);
+
+/*============================================================================
+ * Function Prototypes - DSP_INTC Peripheral Interrupts
+ *============================================================================*/
+
+/**
+ * @brief Register handler for DSP_INTC peripheral interrupt
+ * @param intc_num INTC interrupt number (INTC_UART0, INTC_SPI0, etc.)
+ * @param handler Handler function
+ * @param arg User argument passed to handler
+ * 
+ * Note: These interrupts go through the DSP_INTC and trigger IRQ_INTC (17)
+ */
+void intc_register(uint32_t intc_num, irq_handler_t handler, void *arg);
+
+/**
+ * @brief Unregister DSP_INTC peripheral interrupt handler
+ */
+void intc_unregister(uint32_t intc_num);
+
+/**
+ * @brief Enable DSP_INTC peripheral interrupt
+ * Also ensures IRQ_INTC is enabled at the core level.
+ */
+void intc_enable(uint32_t intc_num);
+
+/**
+ * @brief Disable DSP_INTC peripheral interrupt
+ */
+void intc_disable(uint32_t intc_num);
 
 /*============================================================================
  * Function Prototypes - CCU (Clock Control)
@@ -754,46 +872,6 @@ void gpadc_irq_disable(gpadc_channel_t channel);
  * @return 12-bit ADC value
  */
 uint16_t gpadc_read_data(gpadc_channel_t channel);
-
-/*============================================================================
- * Function Prototypes - Interrupt Management
- *============================================================================*/
-
-/**
- * @brief Register an interrupt handler
- * @param irq_num IRQ number
- * @param handler Handler function
- * @param arg User argument
- */
-void irq_register(uint32_t irq_num, irq_handler_t handler, void *arg);
-
-/**
- * @brief Unregister an interrupt handler
- * @param irq_num IRQ number
- */
-void irq_unregister(uint32_t irq_num);
-
-/**
- * @brief Enable an interrupt
- * @param irq_num IRQ number
- */
-void irq_enable_interrupt(uint32_t irq_num);
-
-/**
- * @brief Disable an interrupt
- * @param irq_num IRQ number
- */
-void irq_disable_interrupt(uint32_t irq_num);
-
-/**
- * @brief Enable global interrupts
- */
-void irq_global_enable(void);
-
-/**
- * @brief Disable global interrupts
- */
-void irq_global_disable(void);
 
 /*============================================================================
  * Timer Definitions (32-bit down counter)
@@ -1408,57 +1486,75 @@ uint16_t pwm_get_counter(pwm_channel_t channel);
 
 /*
  * The MSGBOX provides hardware FIFOs for inter-processor communication.
- * There are 8 unidirectional channels (4 pairs for bidirectional comm).
  * 
- * For ARM <-> DSP communication:
- * - Channels 0,2,4,6: ARM -> DSP (ARM writes, DSP reads)
- * - Channels 1,3,5,7: DSP -> ARM (DSP writes, ARM reads)
+ * Architecture:
+ * - ARM CPUX has its MSGBOX at 0x03003000
+ * - DSP has its MSGBOX at 0x01701000
+ * - Each MSGBOX accesses the SAME shared FIFOs from different perspectives
  * 
- * Each channel has a 4-message deep FIFO (each message is 32-bit).
+ * Register addressing:
+ * - N = Remote CPU index (for DSP talking to ARM, N=0)
+ * - P = Channel number (0-3 channels available)
  * 
- * The DSP uses MSGBOX at 0x01701000
- * The ARM uses MSGBOX at 0x03003000
+ * Communication model:
+ * - At the SAME channel P, user1 (transmitter) writes, user0 (receiver) reads
+ * - From DSP's perspective: DSP is user1 (TX), ARM is user0 (RX)
+ * - So DSP uses WR registers to send, RD registers to receive from ARM
+ * 
+ * FIFO: 8 messages deep, each message is 32 bits
  */
 
-/* MSGBOX Register offsets */
-#define MSGBOX_CTRL(n)          (0x0000 + (n) * 0x4)    /* Control reg for channel n */
-#define MSGBOX_IRQ_EN(u)        (0x0040 + (u) * 0x20)   /* IRQ enable for user u */
-#define MSGBOX_IRQ_STATUS(u)    (0x0050 + (u) * 0x20)   /* IRQ status for user u */
-#define MSGBOX_FIFO_STATUS(n)   (0x0100 + (n) * 0x4)    /* FIFO status for channel n */
-#define MSGBOX_MSG(n)           (0x0180 + (n) * 0x4)    /* Message FIFO for channel n */
-#define MSGBOX_DEBUG(n)         (0x0200 + (n) * 0x4)    /* Debug register for channel n */
+/* MSGBOX Register offsets
+ * N = remote CPU index (0 for ARM<->DSP)
+ * P = channel number (0-3)
+ */
+#define MSGBOX_RD_IRQ_EN(n)         (0x0020 + (n) * 0x100)
+#define MSGBOX_RD_IRQ_STATUS(n)     (0x0024 + (n) * 0x100)
+#define MSGBOX_WR_IRQ_EN(n)         (0x0030 + (n) * 0x100)
+#define MSGBOX_WR_IRQ_STATUS(n)     (0x0034 + (n) * 0x100)
+#define MSGBOX_DEBUG_REG(n)         (0x0040 + (n) * 0x100)
+#define MSGBOX_FIFO_STATUS(n, p)    (0x0050 + (n) * 0x100 + (p) * 0x04)
+#define MSGBOX_MSG_STATUS(n, p)     (0x0060 + (n) * 0x100 + (p) * 0x04)
+#define MSGBOX_MSG(n, p)            (0x0070 + (n) * 0x100 + (p) * 0x04)
+#define MSGBOX_WR_INT_THRESHOLD(n, p) (0x0080 + (n) * 0x100 + (p) * 0x04)
 
-/* MSGBOX IRQ Enable/Status bits (per channel) */
-#define MSGBOX_IRQ_RX_PEND(n)       BIT((n) * 2)      /* RX pending interrupt */
-#define MSGBOX_IRQ_TX_PEND(n)       BIT((n) * 2 + 1)  /* TX pending interrupt */
+/* MSGBOX RD_IRQ_EN / RD_IRQ_STATUS bits (for receiving) */
+#define MSGBOX_RD_IRQ_CH0           BIT(0)  /* Channel 0 RX interrupt */
+#define MSGBOX_RD_IRQ_CH1           BIT(2)  /* Channel 1 RX interrupt */
+#define MSGBOX_RD_IRQ_CH2           BIT(4)  /* Channel 2 RX interrupt */
+#define MSGBOX_RD_IRQ_CH3           BIT(6)  /* Channel 3 RX interrupt */
+#define MSGBOX_RD_IRQ_CH(p)         BIT((p) * 2)
 
-/* MSGBOX FIFO Status bits */
-#define MSGBOX_FIFO_NOT_EMPTY       BIT(0)  /* FIFO not empty */
-#define MSGBOX_FIFO_NOT_FULL        BIT(1)  /* FIFO not full */
-#define MSGBOX_FIFO_MSG_NUM_MASK    (0xF << 4)
-#define MSGBOX_FIFO_MSG_NUM_SHIFT   4
+/* MSGBOX WR_IRQ_EN / WR_IRQ_STATUS bits (for transmitting) */
+#define MSGBOX_WR_IRQ_CH0           BIT(1)  /* Channel 0 TX interrupt */
+#define MSGBOX_WR_IRQ_CH1           BIT(3)  /* Channel 1 TX interrupt */
+#define MSGBOX_WR_IRQ_CH2           BIT(5)  /* Channel 2 TX interrupt */
+#define MSGBOX_WR_IRQ_CH3           BIT(7)  /* Channel 3 TX interrupt */
+#define MSGBOX_WR_IRQ_CH(p)         BIT((p) * 2 + 1)
 
-/* Channel assignments for ARM <-> DSP communication */
-#define MSGBOX_ARM_TO_DSP_CH0   0   /* ARM writes, DSP reads */
-#define MSGBOX_DSP_TO_ARM_CH0   1   /* DSP writes, ARM reads */
-#define MSGBOX_ARM_TO_DSP_CH1   2
-#define MSGBOX_DSP_TO_ARM_CH1   3
-#define MSGBOX_ARM_TO_DSP_CH2   4
-#define MSGBOX_DSP_TO_ARM_CH2   5
-#define MSGBOX_ARM_TO_DSP_CH3   6
-#define MSGBOX_DSP_TO_ARM_CH3   7
+/* MSGBOX FIFO Status bits (MSGBOX_FIFO_STATUS register) */
+#define MSGBOX_FIFO_FULL_FLAG       BIT(0)  /* 1 = FIFO is full */
 
-#define MSGBOX_NUM_CHANNELS     8
-#define MSGBOX_FIFO_DEPTH       4   /* Each FIFO holds 4 messages */
+/* MSGBOX MSG Status bits (MSGBOX_MSG_STATUS register) */
+#define MSGBOX_MSG_NUM_MASK         0x0F    /* Number of messages in FIFO (0-8) */
 
-/* User ID for DSP (ARM is user 0, DSP is user 1) */
-#define MSGBOX_USER_DSP         1
-#define MSGBOX_USER_ARM         0
+/* Remote CPU index for DSP <-> ARM communication */
+#define MSGBOX_REMOTE_ARM           0       /* ARM is remote CPU 0 for DSP */
+
+/* Channel numbers */
+#define MSGBOX_CHANNEL_0            0
+#define MSGBOX_CHANNEL_1            1
+#define MSGBOX_CHANNEL_2            2
+#define MSGBOX_CHANNEL_3            3
+#define MSGBOX_NUM_CHANNELS         4
+
+/* FIFO depth */
+#define MSGBOX_FIFO_DEPTH           8       /* Each FIFO holds 8 messages */
 
 /* Callback for received messages */
 typedef void (*msgbox_rx_callback_t)(uint8_t channel, uint32_t message, void *arg);
 
-/* Callback for TX ready (FIFO has space) */
+/* Callback for TX ready (FIFO not full) */
 typedef void (*msgbox_tx_callback_t)(uint8_t channel, void *arg);
 
 /*============================================================================
@@ -1472,7 +1568,7 @@ void msgbox_init(void);
 
 /**
  * @brief Send a message to the ARM core
- * @param channel Channel to use (should be DSP_TO_ARM: 1, 3, 5, or 7)
+ * @param channel Channel to use (0-3)
  * @param message 32-bit message to send
  * @return 0 on success, -1 if FIFO full
  */
@@ -1486,8 +1582,8 @@ int msgbox_send(uint8_t channel, uint32_t message);
 void msgbox_send_blocking(uint8_t channel, uint32_t message);
 
 /**
- * @brief Receive a message (non-blocking)
- * @param channel Channel to read from (should be ARM_TO_DSP: 0, 2, 4, or 6)
+ * @brief Receive a message from ARM (non-blocking)
+ * @param channel Channel to read from (0-3)
  * @param message Pointer to store received message
  * @return 0 on success, -1 if FIFO empty
  */
@@ -1501,41 +1597,38 @@ int msgbox_recv(uint8_t channel, uint32_t *message);
 uint32_t msgbox_recv_blocking(uint8_t channel);
 
 /**
- * @brief Check if channel has pending messages
+ * @brief Check number of pending messages in receive FIFO
  * @param channel Channel to check
- * @return Number of messages in FIFO (0-4)
+ * @return Number of messages in FIFO (0-8)
  */
 uint8_t msgbox_rx_pending(uint8_t channel);
 
 /**
  * @brief Check if channel can accept more messages
  * @param channel Channel to check
- * @return true if FIFO has space
+ * @return true if FIFO is not full
  */
 bool msgbox_tx_ready(uint8_t channel);
 
 /**
  * @brief Register callback for received messages (interrupt-driven)
- * @param channel Channel to monitor
+ * @param channel Channel to monitor (0-3)
  * @param callback Function to call when message received
  * @param arg User argument passed to callback
  */
 void msgbox_set_rx_callback(uint8_t channel, msgbox_rx_callback_t callback, void *arg);
 
 /**
- * @brief Register callback for TX ready (FIFO has space)
+ * @brief Register callback for TX ready (FIFO not full)
  * @param channel Channel to monitor
  * @param callback Function to call when FIFO has space
  * @param arg User argument passed to callback
- * 
- * Note: TX interrupt fires when FIFO transitions from full to not-full.
- * Useful for implementing non-blocking bulk transfers.
  */
 void msgbox_set_tx_callback(uint8_t channel, msgbox_tx_callback_t callback, void *arg);
 
 /**
  * @brief Enable receive interrupt for a channel
- * @param channel Channel to enable
+ * @param channel Channel to enable (0-3)
  */
 void msgbox_enable_rx_irq(uint8_t channel);
 
@@ -1548,9 +1641,6 @@ void msgbox_disable_rx_irq(uint8_t channel);
 /**
  * @brief Enable transmit interrupt for a channel
  * @param channel Channel to enable
- * 
- * TX interrupt fires when the remote side reads from the FIFO,
- * making space available for new messages.
  */
 void msgbox_enable_tx_irq(uint8_t channel);
 
@@ -1565,6 +1655,30 @@ void msgbox_disable_tx_irq(uint8_t channel);
  * @param channel Channel to flush
  */
 void msgbox_flush_rx(uint8_t channel);
+
+/*============================================================================
+ * Debug/Diagnostic Functions
+ *============================================================================*/
+
+/**
+ * @brief Get current INTENABLE register value
+ */
+uint32_t hal_get_intenable(void);
+
+/**
+ * @brief Get current INTERRUPT register (pending interrupts)
+ */
+uint32_t hal_get_interrupt(void);
+
+/**
+ * @brief Get current PS register value
+ */
+uint32_t hal_get_ps(void);
+
+/**
+ * @brief Trigger a software interrupt for testing
+ */
+void hal_trigger_soft_interrupt(uint32_t irq_num);
 
 /*============================================================================
  * Utility Macros

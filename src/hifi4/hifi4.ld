@@ -1,7 +1,5 @@
-/* Entry point */
-ENTRY(_start)
+ENTRY(_ResetVector)
 
-/* Memory regions */
 MEMORY
 {
     iram0 (rx)  : ORIGIN = 0x00400000, LENGTH = 0x00010000
@@ -14,137 +12,123 @@ PHDRS
     ddr1_phdr  PT_LOAD;
 }
 
-/* Stack and heap sizes */
-__stack_size = 32K;
-__heap_size = 64K;
+PROVIDE(_memmap_vecbase_reset = ORIGIN(iram0) + 0x800);  /* Vector base with room for oemhead */
 
 SECTIONS
 {
     /* OEM header section at start of IRAM */
-    .oemhead.text : ALIGN(4)
-    {
+    .oemhead.text 0x00400000 : {
         KEEP(*(.oemhead.text))
     } > iram0 :iram0_phdr
-
-    /* Code section */
-    .text : ALIGN(4)
-    {
-        _stext = .;
-
-        /* Literal pools for vectors - MUST come before vectors */
-        KEEP(*(.vectors.literal))
-        
-        /* Reset and exception vectors first */
-        KEEP(*(.vectors))
-        KEEP(*(.vectors.*))
-
-        /* Literal pools for init section */
-        KEEP(*(.init.literal))
-        
-        /* Init code */
-        KEEP(*(.init))
-        KEEP(*(.init.*))
-        
-        /* General literal pools - place before/interleaved with code */
-        *(.literal .literal.* .stub .gnu.warning .gnu.linkonce.literal.*)
-        *(.gnu.linkonce.t.*.literal)
-        
-        /* Main code */
-        *(.text)
-        *(.text.*)
-        *(.gnu.linkonce.t.*)
-        
-        /* More literals that might be generated */
-        *(.literal.*)
-        
-        /* Read-only data embedded in text for l32r access */
-        . = ALIGN(4);
-        *(.rodata)
-        *(.rodata.*)
-        *(.rodata1)
-        *(.gnu.linkonce.r.*)
-        
-        /* C++ constructors/destructors */
-        . = ALIGN(4);
-        __CTOR_LIST__ = .;
-        KEEP(*(.ctors))
-        __CTOR_END__ = .;
-        
-        __DTOR_LIST__ = .;
-        KEEP(*(.dtors))
-        __DTOR_END__ = .;
-        
-        . = ALIGN(4);
-        _etext = .;
+    
+    .ResetVector.literal 0x00400800 : ALIGN(4) {
+        *(.ResetVector.literal)
     } > iram0 :iram0_phdr
-
-    /* Initialized data */
-    .data : ALIGN(4)
-    {
-        _sdata = .;
-        
-        *(.data)
-        *(.data.*)
-        *(.gnu.linkonce.d.*)
-        
-        . = ALIGN(4);
-        _edata = .;
+    
+    .ResetVector.text : ALIGN(4) {
+        *(.ResetVector.text)
+    } > iram0 :iram0_phdr
+    
+    /* Interrupt vector literals - MUST come before vector code */
+    .Level2InterruptVector.literal 0x00401000 : ALIGN(4) {
+        *(.Level2InterruptVector.literal)
+    } > iram0 :iram0_phdr
+    
+    /* Interrupt vectors at vecbase + offsets */
+    .Level2InterruptVector.text 0x00401180 : ALIGN(4) {
+        KEEP(*(.Level2InterruptVector.text))
+    } > iram0 :iram0_phdr
+    
+    .Level3InterruptVector.literal : ALIGN(4) {
+        *(.Level3InterruptVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .Level3InterruptVector.text 0x00401200 : ALIGN(4) {
+        KEEP(*(.Level3InterruptVector.text))
+    } > iram0 :iram0_phdr
+    
+    .DebugExceptionVector.literal : ALIGN(4) {
+        *(.DebugExceptionVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .DebugExceptionVector.text 0x00401280 : ALIGN(4) {
+        KEEP(*(.DebugExceptionVector.text))
+    } > iram0 :iram0_phdr
+    
+    .KernelExceptionVector.literal : ALIGN(4) {
+        *(.KernelExceptionVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .KernelExceptionVector.text 0x00401300 : ALIGN(4) {
+        KEEP(*(.KernelExceptionVector.text))
+    } > iram0 :iram0_phdr
+    
+    .UserExceptionVector.literal : ALIGN(4) {
+        *(.UserExceptionVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .UserExceptionVector.text 0x00401380 : ALIGN(4) {
+        KEEP(*(.UserExceptionVector.text))
+    } > iram0 :iram0_phdr
+    
+    .DoubleExceptionVector.literal : ALIGN(4) {
+        *(.DoubleExceptionVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .DoubleExceptionVector.text 0x00401400 : ALIGN(4) {
+        KEEP(*(.DoubleExceptionVector.text))
+    } > iram0 :iram0_phdr
+    
+    .text : ALIGN(4) {
+        *(.literal .literal.* .text .text.*)
+        *(.stub)
+        *(.gnu.linkonce.literal.* .gnu.linkonce.t.*)
+        *(.fini.literal)
+        *(.fini)
+        *(.gnu.version)
     } > ddr1 :ddr1_phdr
-
-    /* Load address for .data section (for copying at startup) */
-    _sidata = LOADADDR(.data);
-
-    /* Uninitialized data (BSS) */
-    .bss (NOLOAD) : ALIGN(4)
-    {
-        _sbss = .;
-        __bss_start__ = .;
-        
-        *(.bss)
-        *(.bss.*)
+    
+    .rodata : ALIGN(4) {
+        *(.rodata .rodata.*)
+        *(.gnu.linkonce.r.*)
+        *(.rodata1)
+    } > ddr1 :ddr1_phdr
+    
+    .data : ALIGN(4) {
+        *(.data .data.*)
+        *(.gnu.linkonce.d.*)
+        *(.data1)
+        *(.sdata .sdata.* .sdata2.*)
+        *(.gnu.linkonce.s.*)
+    } > ddr1 :ddr1_phdr
+    
+    .bss (NOLOAD) : ALIGN(4) {
+        _bss_start = ABSOLUTE(.);
+        *(.dynsbss)
+        *(.sbss .sbss.* .scommon)
+        *(.dynbss)
+        *(.bss .bss.*)
         *(.gnu.linkonce.b.*)
         *(COMMON)
-        
         . = ALIGN(4);
-        _ebss = .;
-        __bss_end__ = .;
+        _bss_end = ABSOLUTE(.);
+    } > ddr1 :ddr1_phdr
+    
+    /* Heap section - place after BSS */
+    .heap (NOLOAD) : ALIGN(8) {
+        _heap_start = ABSOLUTE(.);
+        . = . + 0x10000;  /* 64KB heap */
+        _heap_end = ABSOLUTE(.);
     } > ddr1 :ddr1_phdr
 
-    /* Heap */
-    .heap (NOLOAD) : ALIGN(8)
-    {
-        __heap_start = .;
-        . += __heap_size;
-        __heap_end = .;
+    /* Reserve space for stack at end of DDR - MOVED AFTER HEAP */
+    .stack (NOLOAD) : ALIGN(16) {
+        . = . + 0x8000;  /* 32KB stack */
+        _stack_end = ABSOLUTE(.);
     } > ddr1 :ddr1_phdr
-
-    /* Stack */
-    .stack (NOLOAD) : ALIGN(16)
-    {
-        __stack_start = .;
-        . += __stack_size;
-        __stack_end = .;
-        __stack_top = .;
-    } > ddr1 :ddr1_phdr
-
-    /* Debug information (optional, removed in release builds) */
-    .debug_info     0 : { *(.debug_info)     }
-    .debug_abbrev   0 : { *(.debug_abbrev)   }
-    .debug_line     0 : { *(.debug_line)     }
-    .debug_frame    0 : { *(.debug_frame)    }
-    .debug_str      0 : { *(.debug_str)      }
-    .debug_loc      0 : { *(.debug_loc)      }
-    .debug_ranges   0 : { *(.debug_ranges)   }
-
-    /* Discard sections */
-    /DISCARD/ :
-    {
-        *(.note.GNU-stack)
-        *(.comment)
-    }
+    
+    /* Update stack pointer to point to END of stack section */
+    PROVIDE(__stack = _stack_end);
+    
+    _end = .;
 }
-
-/* Provide symbols for startup code */
-PROVIDE(_stack_top = __stack_top);
-PROVIDE(_heap_start = __heap_start);
-PROVIDE(_heap_end = __heap_end);
