@@ -1,263 +1,249 @@
-/*
- * startup.S - Startup code for R528/T113 HiFi4 DSP (Call0 ABI)
- *
- * Copyright (C) 2025  James Turton <james.turton@gmx.com>
- * This file may be distributed under the terms of the GNU GPLv3 license.
- *
- * Call0 ABI: No register windows, uses a0 as return address
- * - a0: return address
- * - a1: stack pointer
- * - a2-a7: function arguments / return values
- * - a8-a15: callee-saved (must be preserved across calls)
- */
-
-/*
- * Reset vector - entry point after reset
- * Literals MUST be placed before the code that uses them for l32r
- */
-    .section .vectors.literal, "a"
+.section .ResetVector.literal, "a"
     .align 4
-    .literal_position
+.Lstart_addr:
+    .word   _start
 
-_lit_stack_top:
-    .word   __stack_top
-_lit_ps_init:
-    .word   0x00000020
-_lit_sidata:
-    .word   _sidata
-_lit_sdata:
-    .word   _sdata
-_lit_edata:
-    .word   _edata
-_lit_sbss:
-    .word   _sbss
-_lit_ebss:
-    .word   _ebss
+    .section .ResetVector.text, "ax"
+    .global _ResetVector
+    .align 4
 
-    .section .vectors, "ax"
+_ResetVector:
+    /* Load address of _start from literal pool and jump */
+    l32r    a0, .Lstart_addr
+    jx      a0
+
+    .text
+    .align  4
     .global _start
-    .global _reset
-    .align 4
+    .type   _start, @function
 
 _start:
-_reset:
-    /* Disable interrupts - set INTLEVEL to max */
-    rsil    a2, 15
-    
-    /* Set up the stack pointer (must be 16-byte aligned) */
-    l32r    a1, _lit_stack_top
-    
-    /* Set processor state for Call0 ABI
-     * PS.WOE = 0 (no window overflow)
-     * PS.CALLINC = 0
-     * PS.UM = 0 (kernel mode)
-     * PS.EXCM = 0
-     * PS.INTLEVEL = 0 (will enable interrupts later)
-     */
-    l32r    a2, _lit_ps_init
-    wsr     a2, ps
+    /* Initialize PS register - DISABLE windowed calls */
+    movi    a2, 0x00000000  /* PS.WOE=0, PS.INTLEVEL=0, PS.EXCM=0 */
+    wsr.ps  a2
     rsync
-
-    /* Initialize CCOUNT (cycle counter) */
-    movi    a2, 0
-    wsr     a2, ccount
     
-    /* Clear a0 (return address) - we never return from here */
-    movi    a0, 0
+    /* Set interrupt vector base */
+    movi    a2, _memmap_vecbase_reset
+    wsr.vecbase a2
+    rsync
     
-    /* Initialize .data section (copy from ROM/IRAM to DRAM) */
-    l32r    a2, _lit_sidata         /* Source (load address) */
-    l32r    a3, _lit_sdata          /* Destination start */
-    l32r    a4, _lit_edata          /* Destination end */
+    /* Initialize stack pointer */
+    movi    a1, __stack
     
-    bgeu    a3, a4, .Lcopy_data_done
-.Lcopy_data_loop:
-    l32i    a5, a2, 0
-    s32i    a5, a3, 0
-    addi    a2, a2, 4
-    addi    a3, a3, 4
-    bltu    a3, a4, .Lcopy_data_loop
-.Lcopy_data_done:
-
-    /* Clear .bss section */
-    l32r    a2, _lit_sbss           /* BSS start */
-    l32r    a3, _lit_ebss           /* BSS end */
-    movi    a4, 0                   /* Value to write (zero) */
-
-    bgeu    a2, a3, .Lclear_bss_done
-.Lclear_bss_loop:
+    /* Clear BSS section BEFORE calling main */
+    movi    a2, _bss_start
+    movi    a3, _bss_end
+    movi    a4, 0           /* Value to write (zero) */
+.Lbss_loop:
+    bgeu    a2, a3, .Lbss_done
     s32i    a4, a2, 0
     addi    a2, a2, 4
-    bltu    a2, a3, .Lclear_bss_loop
-.Lclear_bss_done:
+    j       .Lbss_loop
+.Lbss_done:
+    
+    /* Set return address to hang loop in case main returns */
+    movi    a0, .Lhang
+    
+    /* Jump to main (using call0 - non-windowed call) */
+    j       main
 
-    /* Call main() - Call0 ABI uses call0 instruction */
-    call0   main
+    /* If main returns, loop forever */
+.Lhang:
+    j       .Lhang
 
-    /* If main() returns, halt */
-.Lhalt:
-    waiti   0                   /* Wait for interrupt (low power) */
-    j       .Lhalt
+/* ============================================================
+   INTERRUPT AND EXCEPTION VECTOR HANDLERS
+   ============================================================ */
 
-
-/*
- * Interrupt/Exception vectors
- * 
- * For HiFi4 DSP, interrupts typically come through external interrupt pins
- * which are then dispatched. The exact vector addresses depend on VECBASE.
- */
-    .section .init.literal, "a"
-    .align 4
-    .literal_position
-
-    .section .init, "ax"
+/* Level 2 Interrupt Vector (Medium priority interrupts) */
+    .section .Level2InterruptVector.literal, "a"
     .align 4
 
-/*
- * User exception handler (EXCCAUSE determines the cause)
- */
-    .global _user_exception
-    .type   _user_exception, @function
-_user_exception:
-    /* For now, just infinite loop on exception */
-    j       _user_exception
-    .size   _user_exception, . - _user_exception
-
-
-/*
- * Interrupt handler for external interrupts (Call0 ABI version)
- * 
- * In Call0 ABI, we need to save/restore a0 (return address) and
- * any registers we use. a2-a7 are caller-saved, a8-a15 are callee-saved.
- */
-    .global _interrupt_handler
-    .type   _interrupt_handler, @function
-_interrupt_handler:
-    /* Allocate stack frame - save all registers we might clobber
-     * Frame size: 80 bytes (16-byte aligned)
-     */
-    addi    a1, a1, -80
+    .section .Level2InterruptVector.text, "ax"
+    .global _Level2InterruptVector
+    .align  4
+_Level2InterruptVector:
+    /* Save minimal context on stack */
+    addi    a1, a1, -64
+    s32i    a0, a1, 0
+    s32i    a2, a1, 4
+    s32i    a3, a1, 8
+    s32i    a4, a1, 12
+    s32i    a5, a1, 16
+    s32i    a6, a1, 20
+    s32i    a7, a1, 24
+    s32i    a8, a1, 28
     
-    /* Save return address and special registers */
-    s32i    a0, a1, 0           /* Return address */
+    /* Save special registers */
+    rsr.epc2 a2
+    s32i    a2, a1, 32
+    rsr.excsave2 a2
+    s32i    a2, a1, 36
     
-    /* Read and save EPC (return PC for interrupt) */
-    rsr     a0, epc1
-    s32i    a0, a1, 4
+    /* Restore special registers */
+    l32i    a2, a1, 32
+    wsr.epc2 a2
+    l32i    a2, a1, 36
+    wsr.excsave2 a2
     
-    /* Read and save PS */
-    rsr     a0, ps
-    s32i    a0, a1, 8
-    
-    /* Save caller-saved registers (a2-a7) */
-    s32i    a2, a1, 16
-    s32i    a3, a1, 20
-    s32i    a4, a1, 24
-    s32i    a5, a1, 28
-    s32i    a6, a1, 32
-    s32i    a7, a1, 36
-    
-    /* Save callee-saved registers we'll use (a8-a15) */
-    s32i    a8, a1, 40
-    s32i    a9, a1, 44
-    s32i    a10, a1, 48
-    s32i    a11, a1, 52
-    s32i    a12, a1, 56
-    s32i    a13, a1, 60
-    s32i    a14, a1, 64
-    s32i    a15, a1, 68
-    
-    /* Call C interrupt dispatcher 
-     * In Call0 ABI, call0 puts return address in a0
-     */
-    call0   hal_irq_dispatch
-    
-    /* Restore callee-saved registers */
-    l32i    a15, a1, 68
-    l32i    a14, a1, 64
-    l32i    a13, a1, 60
-    l32i    a12, a1, 56
-    l32i    a11, a1, 52
-    l32i    a10, a1, 48
-    l32i    a9, a1, 44
-    l32i    a8, a1, 40
-    
-    /* Restore caller-saved registers */
-    l32i    a7, a1, 36
-    l32i    a6, a1, 32
-    l32i    a5, a1, 28
-    l32i    a4, a1, 24
-    l32i    a3, a1, 20
-    l32i    a2, a1, 16
-    
-    /* Restore PS */
-    l32i    a0, a1, 8
-    wsr     a0, ps
-    
-    /* Restore EPC */
-    l32i    a0, a1, 4
-    wsr     a0, epc1
-    
-    /* Restore return address */
+    /* Restore context */
     l32i    a0, a1, 0
+    l32i    a2, a1, 4
+    l32i    a3, a1, 8
+    l32i    a4, a1, 12
+    l32i    a5, a1, 16
+    l32i    a6, a1, 20
+    l32i    a7, a1, 24
+    l32i    a8, a1, 28
+    addi    a1, a1, 64
     
-    /* Deallocate stack frame */
-    addi    a1, a1, 80
-    
-    /* Return from interrupt level 1 */
-    rsync
-    rfe
-    
-    .size   _interrupt_handler, . - _interrupt_handler
-
-
-/*
- * Level 2/3/4/5 interrupt handlers (stubs - customize as needed)
- */
-    .global _interrupt_level2
-    .type   _interrupt_level2, @function
-_interrupt_level2:
+    /* Return from interrupt level 2 */
     rfi     2
-    .size   _interrupt_level2, . - _interrupt_level2
 
-    .global _interrupt_level3
-    .type   _interrupt_level3, @function
-_interrupt_level3:
+/* Level 3 Interrupt Vector (High priority interrupts) */
+    .section .Level3InterruptVector.literal, "a"
+    .align 4
+
+    .section .Level3InterruptVector.text, "ax"
+    .global _Level3InterruptVector
+    .align  4
+_Level3InterruptVector:
+    /* Save minimal context */
+    addi    a1, a1, -64
+    s32i    a0, a1, 0
+    s32i    a2, a1, 4
+    s32i    a3, a1, 8
+    s32i    a4, a1, 12
+    s32i    a5, a1, 16
+    s32i    a6, a1, 20
+    s32i    a7, a1, 24
+    s32i    a8, a1, 28
+    
+    /* Save special registers */
+    rsr.epc3 a2
+    s32i    a2, a1, 32
+    rsr.excsave3 a2
+    s32i    a2, a1, 36
+    
+    /* Restore special registers */
+    l32i    a2, a1, 32
+    wsr.epc3 a2
+    l32i    a2, a1, 36
+    wsr.excsave3 a2
+    
+    /* Restore context */
+    l32i    a0, a1, 0
+    l32i    a2, a1, 4
+    l32i    a3, a1, 8
+    l32i    a4, a1, 12
+    l32i    a5, a1, 16
+    l32i    a6, a1, 20
+    l32i    a7, a1, 24
+    l32i    a8, a1, 28
+    addi    a1, a1, 64
+    
+    /* Return from interrupt level 3 */
     rfi     3
-    .size   _interrupt_level3, . - _interrupt_level3
 
+/* Debug Exception Vector */
+    .section .DebugExceptionVector.literal, "a"
+    .align 4
 
-/*
- * NMI handler
- */
-    .global _nmi_handler
-    .type   _nmi_handler, @function
-_nmi_handler:
-    j       _nmi_handler        /* Infinite loop on NMI */
-    .size   _nmi_handler, . - _nmi_handler
+    .section .DebugExceptionVector.text, "ax"
+    .global _DebugExceptionVector
+    .align  4
+_DebugExceptionVector:
+    /* Save minimal context */
+    addi    a1, a1, -32
+    s32i    a0, a1, 0
+    s32i    a2, a1, 4
+    s32i    a3, a1, 8
+    
+    /* Restore context */
+    l32i    a0, a1, 0
+    l32i    a2, a1, 4
+    l32i    a3, a1, 8
+    addi    a1, a1, 32
+    
+    /* Return from debug exception */
+    rfdd
 
+/* Kernel Exception Vector */
+    .section .KernelExceptionVector.literal, "a"
+    .align 4
 
-/*
- * Debug exception handler
- */
-    .global _debug_exception
-    .type   _debug_exception, @function
-_debug_exception:
-    j       _debug_exception
-    .size   _debug_exception, . - _debug_exception
+    .section .KernelExceptionVector.text, "ax"
+    .global _KernelExceptionVector
+    .align  4
+_KernelExceptionVector:
+    /* Save context */
+    addi    a1, a1, -64
+    s32i    a0, a1, 0
+    s32i    a2, a1, 4
+    s32i    a3, a1, 8
+    s32i    a4, a1, 12
+    
+    /* Save exception cause and address */
+    rsr.exccause a2
+    s32i    a2, a1, 16
+    rsr.excvaddr a2
+    s32i    a2, a1, 20
+    
+    /* Restore context */
+    l32i    a0, a1, 0
+    l32i    a2, a1, 4
+    l32i    a3, a1, 8
+    l32i    a4, a1, 12
+    addi    a1, a1, 64
+    
+    /* Return from exception */
+    rfe
 
+/* User Exception Vector */
+    .section .UserExceptionVector.literal, "a"
+    .align 4
 
-/*
- * Weak symbol for hal_irq_dispatch - allows linking without HAL
- */
-    .weak   hal_irq_dispatch
+    .section .UserExceptionVector.text, "ax"
+    .global _UserExceptionVector
+    .align  4
+_UserExceptionVector:
+    /* Save context */
+    addi    a1, a1, -64
+    s32i    a0, a1, 0
+    s32i    a2, a1, 4
+    s32i    a3, a1, 8
+    s32i    a4, a1, 12
+    
+    /* Save exception cause and address */
+    rsr.exccause a2
+    s32i    a2, a1, 16
+    rsr.excvaddr a2
+    s32i    a2, a1, 20
+    
+    /* Restore context */
+    l32i    a0, a1, 0
+    l32i    a2, a1, 4
+    l32i    a3, a1, 8
+    l32i    a4, a1, 12
+    addi    a1, a1, 64
+    
+    /* Return from exception */
+    rfe
 
+/* Double Exception Vector (Critical - handles exceptions during exception handling) */
+    .section .DoubleExceptionVector.literal, "a"
+    .align 4
 
-/*
- * Default IRQ handler (does nothing, returns)
- */
-    .global _default_irq_handler
-    .type   _default_irq_handler, @function
-_default_irq_handler:
-    ret
-    .size   _default_irq_handler, . - _default_irq_handler
+    .section .DoubleExceptionVector.text, "ax"
+    .global _DoubleExceptionVector
+    .align  4
+_DoubleExceptionVector:
+    /* Double exception is critical - minimal handling */
+    /* Try to save some diagnostic info */
+    rsr.exccause a2
+    rsr.excvaddr a3
+    
+    /* If we return, hang forever */
+.Ldouble_hang:
+    j       .Ldouble_hang
