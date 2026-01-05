@@ -87,6 +87,8 @@
 #define CCU_THS_BGR         0x09FC      /* THS Bus Gating Reset */
 #define CCU_PWM_BGR         0x0C0C      /* PWM Bus Gating Reset */
 #define CCU_TIMER_BGR       0x0850      /* Timer Bus Gating Reset (found in some docs) */
+#define CCU_MSGBOX_BGR      0x071C      /* MSGBOX Bus Gating Reset */
+#define CCU_HSTIMER_BGR     0x073C      /* HSTIMER Bus Gating Reset */
 
 /* For peripherals, bit 0 is usually gating, bit 16 is usually reset */
 #define CCU_BGR_GATING(n)   BIT(n)      /* Clock gating enable */
@@ -135,9 +137,12 @@
 #define CCU_PWM_RST         BIT(16)
 
 /* MSGBOX BGR register and bits */
-#define CCU_MSGBOX_BGR      0x071C      /* MSGBOX Bus Gating Reset */
 #define CCU_MSGBOX_GATING   BIT(0)
 #define CCU_MSGBOX_RST      BIT(16)
+
+/* HSTIMER BGR bits */
+#define CCU_HSTIMER_GATING  BIT(0)
+#define CCU_HSTIMER_RST     BIT(16)
 
 /*============================================================================
  * GPIO Definitions
@@ -623,6 +628,16 @@ void ccu_msgbox_enable(void);
  * @brief Disable clock for MSGBOX
  */
 void ccu_msgbox_disable(void);
+
+/**
+ * @brief Enable clock and deassert reset for HSTIMER
+ */
+void ccu_hstimer_enable(void);
+
+/**
+ * @brief Disable clock for HSTIMER
+ */
+void ccu_hstimer_disable(void);
 
 /*============================================================================
  * Function Prototypes - GPIO

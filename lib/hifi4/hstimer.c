@@ -144,6 +144,8 @@ static void hstimer1_irq_handler(uint32_t irq, void *arg)
 
 void hstimer_init(hstimer_id_t hstimer_id, uint8_t prescaler)
 {
+    ccu_hstimer_enable();
+
     uint32_t ctrl_off, intv_lo_off, intv_hi_off, cur_lo_off, cur_hi_off;
     hstimer_get_offsets(hstimer_id, &ctrl_off, &intv_lo_off, &intv_hi_off, 
                         &cur_lo_off, &cur_hi_off);

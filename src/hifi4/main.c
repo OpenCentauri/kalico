@@ -26,6 +26,8 @@ static void TIMER1_IRQHandler(uint32_t irq, void *arg)
    uart_puts(UART_0, "hello from timer1");
 }
 
+static uint32_t exccause;
+
 int
 main(void)
 {
@@ -36,6 +38,23 @@ main(void)
     uart_puts(UART_0, "--------------\n");
 
     hal_init();
+
+    uart_puts(UART_0, "exccause: ");
+    __asm__ volatile("rsr.exccause %0" : "=a"(exccause));
+    static const char hex_chars[] = "0123456789ABCDEF";
+    char buf[11];
+    
+    buf[0] = '0';
+    buf[1] = 'x';
+    
+    for (int i = 0; i < 8; i++) {
+        buf[9 - i] = hex_chars[exccause & 0xF];
+        exccause >>= 4;
+    }
+    buf[10] = '\0';
+    
+    uart_puts(UART_0, buf);
+    uart_puts(UART_0, "\n");
 
     hal_debug_hex(hal_get_intenable());
     hal_debug_hex(hal_get_interrupt());
@@ -95,6 +114,11 @@ main(void)
         hal_debug_hex(hal_get_intenable());
         hal_debug_hex(hal_get_interrupt());
         hal_debug_hex(hal_get_ps());
+        uart_puts(UART_0, "\n");
+
+        hal_debug_hex(REG32(0x01700800UL + 0x10));
+        hal_debug_hex(REG32(0x01700800UL + 0x14));
+        hal_debug_hex(REG32(0x01700800UL + 0x18));
         uart_puts(UART_0, "\n");
 
         // if (REG32(TIMER_BASE + TMR_IRQ_STA))

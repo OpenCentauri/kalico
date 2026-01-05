@@ -212,3 +212,19 @@ void ccu_msgbox_disable(void)
 {
     ccu_clear_bits(CCU_MSGBOX_BGR, CCU_MSGBOX_GATING | CCU_MSGBOX_RST);
 }
+
+/*============================================================================
+ * HSTIMER Clock Control
+ *============================================================================*/
+
+void ccu_hstimer_enable(void)
+{
+    ccu_set_bits(CCU_HSTIMER_BGR, CCU_HSTIMER_GATING | CCU_HSTIMER_RST);
+    
+    for (volatile int i = 0; i < 100; i++);
+}
+
+void ccu_hstimer_disable(void)
+{
+    ccu_clear_bits(CCU_HSTIMER_BGR, CCU_HSTIMER_GATING | CCU_HSTIMER_RST);
+}

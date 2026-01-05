@@ -357,13 +357,12 @@ static void dispatch_intc_interrupts(void)
  * It reads the Xtensa INTERRUPT register to find pending interrupts
  * and dispatches to registered handlers.
  */
+
+void hal_irq_dispatch(void) __attribute__((used));
+
 void hal_irq_dispatch(void)
 {
-    uart_puts(UART_0, "hello from irq");
-    while (1)
-    {
-        __asm__ volatile("nop");
-    }
+    uart_puts(UART_0, "hello from irq!\n");
     
     /* Get pending interrupts from Xtensa core */
     uint32_t pending = xtensa_get_interrupt();
@@ -382,6 +381,7 @@ void hal_irq_dispatch(void)
         } else {
             /* Direct DSP core interrupt - call registered handler */
             if ((uint32_t)irq < MAX_IRQ_NUM && irq_table[irq].handler) {
+                uart_puts(UART_0, "calling handler!\n");
                 irq_table[irq].handler(irq, irq_table[irq].arg);
             }
         }
