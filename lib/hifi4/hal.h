@@ -410,7 +410,7 @@ typedef enum {
 #define IRQ_HSTIMER1        16      /* High-speed timer 1 */
 #define IRQ_INTC            17      /* External interrupt controller (DSP_INTC) */
 #define IRQ_TIMER0          18      /* Timer 0 */
-#define IRQ_TIMER1          19      /* Timer 1 */
+#define IRQ_TIMER1          22      /* Timer 1 */
 #define IRQ_GPADC           20      /* GPADC (named GPA in table) */
 #define IRQ_LRADC           21      /* LRADC */
 #define IRQ_TPADC           22      /* TPADC */

@@ -12,7 +12,8 @@ PHDRS
     ddr1_phdr  PT_LOAD;
 }
 
-PROVIDE(_memmap_vecbase_reset = ORIGIN(iram0) + 0x800);  /* Vector base with room for oemhead */
+PROVIDE(_memmap_reset_vector = 0x00400660);
+PROVIDE(_memmap_vecbase_reset = 0x00401000);
 
 SECTIONS
 {
@@ -21,21 +22,21 @@ SECTIONS
         KEEP(*(.oemhead.text))
     } > iram0 :iram0_phdr
     
-    .ResetVector.literal 0x00400800 : ALIGN(4) {
+    .ResetVector.literal : ALIGN(4) {
         *(.ResetVector.literal)
     } > iram0 :iram0_phdr
     
-    .ResetVector.text : ALIGN(4) {
+    .ResetVector.text 0x00400660 : ALIGN(4) {
         *(.ResetVector.text)
     } > iram0 :iram0_phdr
     
     /* Interrupt vector literals - MUST come before vector code */
-    .Level2InterruptVector.literal 0x00401000 : ALIGN(4) {
+    .Level2InterruptVector.literal : ALIGN(4) {
         *(.Level2InterruptVector.literal)
     } > iram0 :iram0_phdr
     
     /* Interrupt vectors at vecbase + offsets */
-    .Level2InterruptVector.text 0x00401180 : ALIGN(4) {
+    .Level2InterruptVector.text 0x0040117C : ALIGN(4) {
         KEEP(*(.Level2InterruptVector.text))
     } > iram0 :iram0_phdr
     
@@ -43,7 +44,7 @@ SECTIONS
         *(.Level3InterruptVector.literal)
     } > iram0 :iram0_phdr
     
-    .Level3InterruptVector.text 0x00401200 : ALIGN(4) {
+    .Level3InterruptVector.text 0x0040119C : ALIGN(4) {
         KEEP(*(.Level3InterruptVector.text))
     } > iram0 :iram0_phdr
     
@@ -51,15 +52,23 @@ SECTIONS
         *(.DebugExceptionVector.literal)
     } > iram0 :iram0_phdr
     
-    .DebugExceptionVector.text 0x00401280 : ALIGN(4) {
+    .DebugExceptionVector.text 0x004011BC : ALIGN(4) {
         KEEP(*(.DebugExceptionVector.text))
+    } > iram0 :iram0_phdr
+    
+    .NMIExceptionVector.literal : ALIGN(4) {
+        *(.NMIExceptionVector.literal)
+    } > iram0 :iram0_phdr
+    
+    .NMIExceptionVector.text 0x004011DC : ALIGN(4) {
+        KEEP(*(.NMIExceptionVector.text))
     } > iram0 :iram0_phdr
     
     .KernelExceptionVector.literal : ALIGN(4) {
         *(.KernelExceptionVector.literal)
     } > iram0 :iram0_phdr
     
-    .KernelExceptionVector.text 0x00401300 : ALIGN(4) {
+    .KernelExceptionVector.text 0x004011FC : ALIGN(4) {
         KEEP(*(.KernelExceptionVector.text))
     } > iram0 :iram0_phdr
     
@@ -67,7 +76,7 @@ SECTIONS
         *(.UserExceptionVector.literal)
     } > iram0 :iram0_phdr
     
-    .UserExceptionVector.text 0x00401380 : ALIGN(4) {
+    .UserExceptionVector.text 0x0040121C : ALIGN(4) {
         KEEP(*(.UserExceptionVector.text))
     } > iram0 :iram0_phdr
     
@@ -75,7 +84,7 @@ SECTIONS
         *(.DoubleExceptionVector.literal)
     } > iram0 :iram0_phdr
     
-    .DoubleExceptionVector.text 0x00401400 : ALIGN(4) {
+    .DoubleExceptionVector.text 0x0040123C : ALIGN(4) {
         KEEP(*(.DoubleExceptionVector.text))
     } > iram0 :iram0_phdr
     

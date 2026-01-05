@@ -59,44 +59,15 @@ _start:
 /* Level 2 Interrupt Vector (Medium priority interrupts) */
     .section .Level2InterruptVector.literal, "a"
     .align 4
+.Llevel2_handler_addr:
+    .word   main
 
     .section .Level2InterruptVector.text, "ax"
     .global _Level2InterruptVector
     .align  4
 _Level2InterruptVector:
-    /* Save minimal context on stack */
-    addi    a1, a1, -64
-    s32i    a0, a1, 0
-    s32i    a2, a1, 4
-    s32i    a3, a1, 8
-    s32i    a4, a1, 12
-    s32i    a5, a1, 16
-    s32i    a6, a1, 20
-    s32i    a7, a1, 24
-    s32i    a8, a1, 28
-    
-    /* Save special registers */
-    rsr.epc2 a2
-    s32i    a2, a1, 32
-    rsr.excsave2 a2
-    s32i    a2, a1, 36
-    
-    /* Restore special registers */
-    l32i    a2, a1, 32
-    wsr.epc2 a2
-    l32i    a2, a1, 36
-    wsr.excsave2 a2
-    
-    /* Restore context */
-    l32i    a0, a1, 0
-    l32i    a2, a1, 4
-    l32i    a3, a1, 8
-    l32i    a4, a1, 12
-    l32i    a5, a1, 16
-    l32i    a6, a1, 20
-    l32i    a7, a1, 24
-    l32i    a8, a1, 28
-    addi    a1, a1, 64
+    l32r    a0, .Llevel2_handler_addr
+    callx0  a0
     
     /* Return from interrupt level 2 */
     rfi     2
@@ -104,44 +75,15 @@ _Level2InterruptVector:
 /* Level 3 Interrupt Vector (High priority interrupts) */
     .section .Level3InterruptVector.literal, "a"
     .align 4
+.Llevel3_handler_addr:
+    .word   main
 
     .section .Level3InterruptVector.text, "ax"
     .global _Level3InterruptVector
     .align  4
 _Level3InterruptVector:
-    /* Save minimal context */
-    addi    a1, a1, -64
-    s32i    a0, a1, 0
-    s32i    a2, a1, 4
-    s32i    a3, a1, 8
-    s32i    a4, a1, 12
-    s32i    a5, a1, 16
-    s32i    a6, a1, 20
-    s32i    a7, a1, 24
-    s32i    a8, a1, 28
-    
-    /* Save special registers */
-    rsr.epc3 a2
-    s32i    a2, a1, 32
-    rsr.excsave3 a2
-    s32i    a2, a1, 36
-    
-    /* Restore special registers */
-    l32i    a2, a1, 32
-    wsr.epc3 a2
-    l32i    a2, a1, 36
-    wsr.excsave3 a2
-    
-    /* Restore context */
-    l32i    a0, a1, 0
-    l32i    a2, a1, 4
-    l32i    a3, a1, 8
-    l32i    a4, a1, 12
-    l32i    a5, a1, 16
-    l32i    a6, a1, 20
-    l32i    a7, a1, 24
-    l32i    a8, a1, 28
-    addi    a1, a1, 64
+    l32r    a0, .Llevel3_handler_addr
+    callx0  a0
     
     /* Return from interrupt level 3 */
     rfi     3
@@ -149,22 +91,15 @@ _Level3InterruptVector:
 /* Debug Exception Vector */
     .section .DebugExceptionVector.literal, "a"
     .align 4
+.Ldebug_handler_addr:
+    .word   main
 
     .section .DebugExceptionVector.text, "ax"
     .global _DebugExceptionVector
     .align  4
 _DebugExceptionVector:
-    /* Save minimal context */
-    addi    a1, a1, -32
-    s32i    a0, a1, 0
-    s32i    a2, a1, 4
-    s32i    a3, a1, 8
-    
-    /* Restore context */
-    l32i    a0, a1, 0
-    l32i    a2, a1, 4
-    l32i    a3, a1, 8
-    addi    a1, a1, 32
+    l32r    a0, .Ldebug_handler_addr
+    callx0  a0
     
     /* Return from debug exception */
     rfdd
@@ -172,30 +107,15 @@ _DebugExceptionVector:
 /* Kernel Exception Vector */
     .section .KernelExceptionVector.literal, "a"
     .align 4
+.Lkernel_handler_addr:
+    .word   main
 
     .section .KernelExceptionVector.text, "ax"
     .global _KernelExceptionVector
     .align  4
 _KernelExceptionVector:
-    /* Save context */
-    addi    a1, a1, -64
-    s32i    a0, a1, 0
-    s32i    a2, a1, 4
-    s32i    a3, a1, 8
-    s32i    a4, a1, 12
-    
-    /* Save exception cause and address */
-    rsr.exccause a2
-    s32i    a2, a1, 16
-    rsr.excvaddr a2
-    s32i    a2, a1, 20
-    
-    /* Restore context */
-    l32i    a0, a1, 0
-    l32i    a2, a1, 4
-    l32i    a3, a1, 8
-    l32i    a4, a1, 12
-    addi    a1, a1, 64
+    l32r    a0, .Lkernel_handler_addr
+    callx0  a0
     
     /* Return from exception */
     rfe
@@ -203,30 +123,15 @@ _KernelExceptionVector:
 /* User Exception Vector */
     .section .UserExceptionVector.literal, "a"
     .align 4
+.Luser_handler_addr:
+    .word   main
 
     .section .UserExceptionVector.text, "ax"
     .global _UserExceptionVector
     .align  4
 _UserExceptionVector:
-    /* Save context */
-    addi    a1, a1, -64
-    s32i    a0, a1, 0
-    s32i    a2, a1, 4
-    s32i    a3, a1, 8
-    s32i    a4, a1, 12
-    
-    /* Save exception cause and address */
-    rsr.exccause a2
-    s32i    a2, a1, 16
-    rsr.excvaddr a2
-    s32i    a2, a1, 20
-    
-    /* Restore context */
-    l32i    a0, a1, 0
-    l32i    a2, a1, 4
-    l32i    a3, a1, 8
-    l32i    a4, a1, 12
-    addi    a1, a1, 64
+    l32r    a0, .Luser_handler_addr
+    callx0  a0
     
     /* Return from exception */
     rfe
