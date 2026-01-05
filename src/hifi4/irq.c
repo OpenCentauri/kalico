@@ -37,7 +37,7 @@ void irq_restore(irqstatus_t flag)
 void irq_wait(void)
 {
     irq_global_enable();
-    asm("nop\n    nop\n    nop" : : : "memory");
+    __asm__ volatile("waiti 0");
     irq_global_disable();
 }
 

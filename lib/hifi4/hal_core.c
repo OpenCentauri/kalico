@@ -359,6 +359,12 @@ static void dispatch_intc_interrupts(void)
  */
 void hal_irq_dispatch(void)
 {
+    uart_puts(UART_0, "hello from irq");
+    while (1)
+    {
+        __asm__ volatile("nop");
+    }
+    
     /* Get pending interrupts from Xtensa core */
     uint32_t pending = xtensa_get_interrupt();
     uint32_t enabled = xtensa_get_intenable();
