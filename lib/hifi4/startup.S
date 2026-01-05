@@ -108,12 +108,13 @@ _DebugExceptionVector:
     .section .KernelExceptionVector.literal, "a"
     .align 4
 .Lkernel_handler_addr:
-    .word   main
+    .word   hal_irq_dispatch
 
     .section .KernelExceptionVector.text, "ax"
     .global _KernelExceptionVector
     .align  4
 _KernelExceptionVector:
+    wsr     a0, 209
     l32r    a0, .Lkernel_handler_addr
     callx0  a0
     
