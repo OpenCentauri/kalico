@@ -169,9 +169,6 @@ void timer_start_oneshot(timer_id_t timer_id, uint32_t interval_us,
     /* Set interval */
     timer_write_reg(intv_offset, ticks);
     
-    /* Configure for one-shot mode (no reload) */
-    ctrl &= ~(TMR_CTRL_RELOAD | TMR_CTRL_MODE_CONT);
-    
     /* Store handler */
     timer_handlers[timer_id].handler = handler;
     timer_handlers[timer_id].arg = arg;
@@ -190,9 +187,15 @@ void timer_start_oneshot(timer_id_t timer_id, uint32_t interval_us,
         timer_write_reg(TMR_IRQ_EN, irq_en);
     }
     
-    /* Clear pending and start */
+    /* Clear pending interrupt */
     timer_write_reg(TMR_IRQ_STA, timer_get_irq_bit(timer_id));
-    ctrl |= TMR_CTRL_EN | TMR_CTRL_RELOAD; /* Reload to load interval value */
+    
+    /* Configure for single-shot mode (bit 7 = 1) and trigger reload */
+    ctrl |= TMR_CTRL_MODE_SINGLE | TMR_CTRL_RELOAD;
+    timer_write_reg(ctrl_offset, ctrl);
+    
+    /* Enable timer */
+    ctrl |= TMR_CTRL_EN;
     timer_write_reg(ctrl_offset, ctrl);
 }
 
@@ -213,9 +216,6 @@ void timer_start_periodic(timer_id_t timer_id, uint32_t interval_us,
     /* Set interval */
     timer_write_reg(intv_offset, ticks);
     
-    /* Configure for continuous mode */
-    ctrl |= TMR_CTRL_RELOAD | TMR_CTRL_MODE_CONT;
-    
     /* Store handler */
     timer_handlers[timer_id].handler = handler;
     timer_handlers[timer_id].arg = arg;
@@ -227,13 +227,24 @@ void timer_start_periodic(timer_id_t timer_id, uint32_t interval_us,
         irq_register(irq_num, sys_handler, NULL);
         irq_enable_interrupt(irq_num);
         
+        /* Enable timer interrupt in timer peripheral */
         uint32_t irq_en = timer_read_reg(TMR_IRQ_EN);
         irq_en |= timer_get_irq_bit(timer_id);
         timer_write_reg(TMR_IRQ_EN, irq_en);
     }
     
-    /* Clear pending and start */
+    /* Clear any pending interrupt */
     timer_write_reg(TMR_IRQ_STA, timer_get_irq_bit(timer_id));
+    
+    /* 
+     * Set periodic mode (bit 7 = 0) and trigger reload
+     * The reload bit loads the interval value into the counter
+     */
+    ctrl &= ~TMR_CTRL_MODE_SINGLE;  /* Clear bit 7 = periodic mode */
+    ctrl |= TMR_CTRL_RELOAD;        /* Trigger reload of interval value */
+    timer_write_reg(ctrl_offset, ctrl);
+    
+    /* Enable the timer */
     ctrl |= TMR_CTRL_EN;
     timer_write_reg(ctrl_offset, ctrl);
 }
