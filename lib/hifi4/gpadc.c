@@ -62,7 +62,7 @@ void gpadc_init(uint32_t sample_rate)
      * For simplicity, we'll use reasonable defaults:
      * fs_div = 4, tacq = 63 gives approximately 75 kHz base rate
      */
-    uint32_t hosc_freq = 24000000; /* 24 MHz */
+    uint32_t hosc_freq = CLK_FREQ_HOSC; /* 24 MHz */
     uint32_t fs_div = 4;
     uint32_t tacq = 63;
     
