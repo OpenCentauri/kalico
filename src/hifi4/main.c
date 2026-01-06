@@ -18,12 +18,12 @@ void delay(int count) {
 
 static void TIMER0_IRQHandler(uint32_t irq, void *arg)
 {
-   uart_puts(UART_0, "hello from timer0");
+   uart_puts(UART_0, "hello from timer0\n");
 }
 
 static void TIMER1_IRQHandler(uint32_t irq, void *arg)
 {
-   uart_puts(UART_0, "hello from timer1");
+   uart_puts(UART_0, "hello from timer1\n");
 }
 
 static uint32_t exccause;
@@ -103,37 +103,37 @@ main(void)
     hstimer_start_periodic(HSTIMER_1, 10000000, TIMER1_IRQHandler, NULL);//0xffffffff 1000000
 
     for (;;) {
-        gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 1);
-        delay(1000000);
-        gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 0);
+        // gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 1);
+        // delay(1000000);
+        // gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 0);
 
-        uint32_t hi, lo;
-        uart_puts(UART_0, "hello from dsp timer0: ");
-        hstimer_get_counter(HSTIMER_0, &lo, &hi);
-        hal_debug_hex(hi);
-        hal_debug_hex(lo);
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR0_CTRL));
-        uart_puts(UART_0, "\n");
-        uart_puts(UART_0, "hello from dsp timer1: ");
-        hstimer_get_counter(HSTIMER_1, &lo, &hi);
-        hal_debug_hex(hi);
-        hal_debug_hex(lo);
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
-        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR1_CTRL));
-        uart_puts(UART_0, "\n");
+        // uint32_t hi, lo;
+        // uart_puts(UART_0, "hello from dsp timer0: ");
+        // hstimer_get_counter(HSTIMER_0, &lo, &hi);
+        // hal_debug_hex(hi);
+        // hal_debug_hex(lo);
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR0_CTRL));
+        // uart_puts(UART_0, "\n");
+        // uart_puts(UART_0, "hello from dsp timer1: ");
+        // hstimer_get_counter(HSTIMER_1, &lo, &hi);
+        // hal_debug_hex(hi);
+        // hal_debug_hex(lo);
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
+        // hal_debug_hex(REG32(HSTIMER_BASE + HSTMR1_CTRL));
+        // uart_puts(UART_0, "\n");
 
-        hal_debug_hex(hal_get_intenable());
-        hal_debug_hex(hal_get_interrupt());
-        hal_debug_hex(hal_get_ps());
-        uart_puts(UART_0, "\n");
+        // hal_debug_hex(hal_get_intenable());
+        // hal_debug_hex(hal_get_interrupt());
+        // hal_debug_hex(hal_get_ps());
+        // uart_puts(UART_0, "\n");
 
-        hal_debug_hex(REG32(0x01700800UL + 0x10));
-        hal_debug_hex(REG32(0x01700800UL + 0x14));
-        hal_debug_hex(REG32(0x01700800UL + 0x18));
-        uart_puts(UART_0, "\n");
+        // hal_debug_hex(REG32(0x01700800UL + 0x10));
+        // hal_debug_hex(REG32(0x01700800UL + 0x14));
+        // hal_debug_hex(REG32(0x01700800UL + 0x18));
+        // uart_puts(UART_0, "\n");
 
         // if (REG32(TIMER_BASE + TMR_IRQ_STA))
         // {

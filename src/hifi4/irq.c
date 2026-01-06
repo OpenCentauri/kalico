@@ -25,12 +25,15 @@ irq_enable(void)
 irqstatus_t
 irq_save(void)
 {
-    return 0;
+    irqstatus_t flag = hal_get_intenable();
+    irq_disable();
+    return flag;
 }
 
 // Restore hardware interrupts to state from flag returned by irq_save()
 void irq_restore(irqstatus_t flag)
 {
+    hal_set_intenable(flag);
 }
 
 // Atomically enable hardware interrupts and sleep processor until next irq

@@ -286,6 +286,14 @@ uint32_t hal_get_intenable(void)
 }
 
 /**
+ * @brief Set INTENABLE register
+ */
+void hal_set_intenable(uint32_t irqs)
+{
+    return xtensa_set_intenable(irqs);
+}
+
+/**
  * @brief Get current INTERRUPT register value (pending interrupts)
  */
 uint32_t hal_get_interrupt(void)
