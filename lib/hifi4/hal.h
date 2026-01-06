@@ -910,8 +910,7 @@ uint16_t gpadc_read_data(gpadc_channel_t channel);
 #define TMR_CTRL_CLK_OSC24M     (1 << 2)    /* 24 MHz */
 #define TMR_CTRL_PRESCALE_MASK  (0x7 << 4)  /* Prescaler */
 #define TMR_CTRL_PRESCALE(n)    ((n) << 4)  /* Divide by 2^n */
-#define TMR_CTRL_MODE_SINGLE    0           /* Single shot */
-#define TMR_CTRL_MODE_CONT      BIT(7)      /* Continuous */
+#define TMR_CTRL_MODE_SINGLE    BIT(7)      /* Single shot */
 
 /* Timer IRQ bits */
 #define TMR_IRQ_TMR0            BIT(0)
