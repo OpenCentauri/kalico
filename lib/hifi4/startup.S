@@ -242,7 +242,7 @@ _xt_int_enter:
     .section .Level2InterruptVector.literal, "a"
     .align 4
 .Llevel2_handler_addr:
-    .word   main
+    .word   hal_irq_dispatch
 
     .section .Level2InterruptVector.text, "ax"
     .global _Level2InterruptVector
@@ -258,7 +258,7 @@ _Level2InterruptVector:
     .section .Level3InterruptVector.literal, "a"
     .align 4
 .Llevel3_handler_addr:
-    .word   main
+    .word   hal_irq_dispatch
 
     .section .Level3InterruptVector.text, "ax"
     .global _Level3InterruptVector
@@ -274,7 +274,7 @@ _Level3InterruptVector:
     .section .DebugExceptionVector.literal, "a"
     .align 4
 .Ldebug_handler_addr:
-    .word   main
+    .word   hal_irq_dispatch
 
     .section .DebugExceptionVector.text, "ax"
     .global _DebugExceptionVector
@@ -308,7 +308,7 @@ _KernelExceptionVector:
     .section .UserExceptionVector.literal, "a"
     .align 4
 .Luser_handler_addr:
-    .word   main
+    .word   hal_irq_dispatch
 
     .section .UserExceptionVector.text, "ax"
     .global _UserExceptionVector

@@ -96,27 +96,33 @@ main(void)
     gpio_init();
     gpio_set_mode(GPIO_PIN(GPIO_PORT_G, 15), GPIO_MODE_OUTPUT);
 
-    timer_init(TIMER_0, TIMER_CLK_OSC24M, 0);
-    timer_start_periodic(TIMER_0, 8000000, TIMER0_IRQHandler, NULL);//0xffffffff 1000000
+    hstimer_init(HSTIMER_0, 0);
+    hstimer_start_periodic(HSTIMER_0, 5000000, TIMER0_IRQHandler, NULL);//0xffffffff 1000000
 
-    timer_init(TIMER_1, TIMER_CLK_OSC24M, 0);
-    timer_start_periodic(TIMER_1, 10000000, TIMER1_IRQHandler, NULL);//0xffffffff 1000000
+    hstimer_init(HSTIMER_1, 0);
+    hstimer_start_periodic(HSTIMER_1, 10000000, TIMER1_IRQHandler, NULL);//0xffffffff 1000000
 
     for (;;) {
         gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 1);
         delay(1000000);
         gpio_write(GPIO_PIN(GPIO_PORT_G, 15), 0);
+
+        uint32_t hi, lo;
         uart_puts(UART_0, "hello from dsp timer0: ");
-        hal_debug_hex(timer_get_counter(TIMER_0));
-        hal_debug_hex(REG32(TIMER_BASE + TMR_IRQ_STA));
-        hal_debug_hex(REG32(TIMER_BASE + TMR_IRQ_EN));
-        hal_debug_hex(REG32(TIMER_BASE + TMR0_CTRL));
+        hstimer_get_counter(HSTIMER_0, &lo, &hi);
+        hal_debug_hex(hi);
+        hal_debug_hex(lo);
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR0_CTRL));
         uart_puts(UART_0, "\n");
         uart_puts(UART_0, "hello from dsp timer1: ");
-        hal_debug_hex(timer_get_counter(TIMER_1));
-        hal_debug_hex(REG32(TIMER_BASE + TMR_IRQ_STA));
-        hal_debug_hex(REG32(TIMER_BASE + TMR_IRQ_EN));
-        hal_debug_hex(REG32(TIMER_BASE + TMR1_CTRL));
+        hstimer_get_counter(HSTIMER_1, &lo, &hi);
+        hal_debug_hex(hi);
+        hal_debug_hex(lo);
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_STA));
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR_IRQ_EN));
+        hal_debug_hex(REG32(HSTIMER_BASE + HSTMR1_CTRL));
         uart_puts(UART_0, "\n");
 
         hal_debug_hex(hal_get_intenable());

@@ -188,10 +188,6 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t interval_us,
     hstimer_write_reg(intv_lo_off, ticks_lo);
     hstimer_write_reg(intv_hi_off, ticks_hi & 0x00FFFFFF);
     
-    /* One-shot mode */
-    ctrl &= ~HSTMR_CTRL_MODE_CONT;
-    ctrl |= HSTMR_CTRL_RELOAD;
-    
     /* Store handler */
     hstimer_handlers[hstimer_id].handler = handler;
     hstimer_handlers[hstimer_id].arg = arg;
@@ -207,8 +203,14 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t interval_us,
         hstimer_write_reg(HSTMR_IRQ_EN, irq_en);
     }
     
-    /* Clear pending and start */
+    /* Clear pending interrupt */
     hstimer_write_reg(HSTMR_IRQ_STA, hstimer_get_irq_bit(hstimer_id));
+
+    /* Configure for single-shot mode (bit 7 = 1) and trigger reload */
+    ctrl |= HSTMR_CTRL_MODE_SINGLE | HSTMR_CTRL_RELOAD;
+    hstimer_write_reg(ctrl_off, ctrl);
+
+    /* Enable timer */
     ctrl |= HSTMR_CTRL_EN;
     hstimer_write_reg(ctrl_off, ctrl);
 }
@@ -231,9 +233,6 @@ void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t interval_us,
     hstimer_write_reg(intv_lo_off, ticks_lo);
     hstimer_write_reg(intv_hi_off, ticks_hi & 0x00FFFFFF);
     
-    /* Continuous mode */
-    ctrl |= HSTMR_CTRL_MODE_CONT | HSTMR_CTRL_RELOAD;
-    
     hstimer_handlers[hstimer_id].handler = handler;
     hstimer_handlers[hstimer_id].arg = arg;
     
@@ -247,8 +246,19 @@ void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t interval_us,
         irq_en |= hstimer_get_irq_bit(hstimer_id);
         hstimer_write_reg(HSTMR_IRQ_EN, irq_en);
     }
-    
+
+    /* Clear any pending interrupt */
     hstimer_write_reg(HSTMR_IRQ_STA, hstimer_get_irq_bit(hstimer_id));
+
+    /* 
+     * Set periodic mode (bit 7 = 0) and trigger reload
+     * The reload bit loads the interval value into the counter
+     */
+    ctrl &= ~HSTMR_CTRL_MODE_SINGLE;  /* Clear bit 7 = periodic mode */
+    ctrl |= HSTMR_CTRL_RELOAD;        /* Trigger reload of interval value */
+    hstimer_write_reg(ctrl_off, ctrl);
+
+    /* Enable the timer */
     ctrl |= HSTMR_CTRL_EN;
     hstimer_write_reg(ctrl_off, ctrl);
 }

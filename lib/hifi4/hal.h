@@ -51,7 +51,7 @@
 #define TIMER_BASE          0x02050000UL
 
 /* High-Speed Timer */
-#define HSTIMER_BASE        0x02040000UL
+#define HSTIMER_BASE        0x03008000UL
 
 /* Watchdog */
 #define WDOG_BASE           0x02050020UL
@@ -409,16 +409,16 @@ typedef enum {
  */
 
 /* Direct DSP Core interrupts (directly wired to core) */
-#define IRQ_DSP_WDOG        13      /* DSP Watchdog */
-#define IRQ_DSP_TZMA        14      /* DSP TZMA */
-#define IRQ_HSTIMER0        15      /* High-speed timer 0 */
-#define IRQ_HSTIMER1        16      /* High-speed timer 1 */
-#define IRQ_INTC            17      /* External interrupt controller (DSP_INTC) */
-#define IRQ_TIMER0          18      /* Timer 0 */
+#define IRQ_DSP_WDOG        16      /* DSP Watchdog */
+#define IRQ_DSP_TZMA        17      /* DSP TZMA */
+#define IRQ_HSTIMER0        18      /* High-speed timer 0 */
+#define IRQ_HSTIMER1        19      /* High-speed timer 1 */
+#define IRQ_INTC            20      /* External interrupt controller (DSP_INTC) */
+#define IRQ_TIMER0          21      /* Timer 0 */
 #define IRQ_TIMER1          22      /* Timer 1 */
-#define IRQ_GPADC           20      /* GPADC (named GPA in table) */
-#define IRQ_LRADC           21      /* LRADC */
-#define IRQ_TPADC           22      /* TPADC */
+#define IRQ_GPADC           23      /* GPADC (named GPA in table) */
+#define IRQ_LRADC           24      /* LRADC */
+#define IRQ_TPADC           25      /* TPADC */
 
 /* DSP_INTC interrupt bit numbers (bits in DSP_INTC pending register)
  * These are dispatched when IRQ_INTC (17) fires.
@@ -949,8 +949,7 @@ typedef enum {
 #define HSTMR_CTRL_RELOAD       BIT(1)      /* Reload mode */
 #define HSTMR_CTRL_CLK_PRE_MASK (0x7 << 4)  /* Prescaler */
 #define HSTMR_CTRL_CLK_PRE(n)   ((n) << 4)  /* Divide by 2^n */
-#define HSTMR_CTRL_MODE_SINGLE  0
-#define HSTMR_CTRL_MODE_CONT    BIT(7)
+#define HSTMR_CTRL_MODE_SINGLE  BIT(7)      /* Single shot */
 
 /* HSTimer IRQ bits */
 #define HSTMR_IRQ_TMR0          BIT(0)
