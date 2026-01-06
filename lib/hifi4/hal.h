@@ -1687,6 +1687,11 @@ void msgbox_flush_rx(uint8_t channel);
 uint32_t hal_get_intenable(void);
 
 /**
+ * @brief Set INTENABLE register
+ */
+void hal_set_intenable(uint32_t irqs);
+
+/**
  * @brief Get current INTERRUPT register (pending interrupts)
  */
 uint32_t hal_get_interrupt(void);

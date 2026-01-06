@@ -38,7 +38,7 @@ timer_read_time(void)
 inline void
 timer_set(uint32_t next)
 {
-    timer_start_periodic(TIMER_0, next, TIMER0_IRQHandler, NULL);
+    hstimer_start_periodic(HSTIMER_0, next, HSTIMER0_IRQHandler, NULL);
 }
 
 // Activate timer dispatch as soon as possible
@@ -84,10 +84,10 @@ timer_hw_init(void)
 
     hstimer_init(HSTIMER_1, 0);
     hstimer_start_periodic(HSTIMER_1, 0xffffffff, HSTIMER1_IRQHandler, NULL);
-    hstimer_reset();
+    timer_reset();
 
     hstimer_init(HSTIMER_0, 0);
     hstimer_start_periodic(HSTIMER_0, 200000, HSTIMER0_IRQHandler, NULL);
-    hstimer_kick();
+    timer_kick();
 }
 DECL_INIT(timer_hw_init);
