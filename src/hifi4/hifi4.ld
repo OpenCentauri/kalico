@@ -22,6 +22,14 @@ SECTIONS
         KEEP(*(.oemhead.text))
     } > iram0 :iram0_phdr
     
+    ._xt_int_enter.literal : ALIGN(4) {
+        *(._xt_int_enter.literal)
+    } > iram0 :iram0_phdr
+
+    .text._xt_int_enter : ALIGN(4) {
+        KEEP(*(.text._xt_int_enter))
+    } > iram0 :iram0_phdr
+    
     .ResetVector.literal : ALIGN(4) {
         *(.ResetVector.literal)
     } > iram0 :iram0_phdr
