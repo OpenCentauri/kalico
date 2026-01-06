@@ -23,9 +23,7 @@ static struct {
     void *arg;
 } hstimer_handlers[2];
 
-#define AHB0_CLK 200000000
-
-static uint32_t hstimer_clock_hz[2] = {AHB0_CLK, AHB0_CLK};
+static uint32_t hstimer_clock_hz[2] = {CLK_FREQ_AHB0, CLK_FREQ_AHB0};
 
 /*============================================================================
  * Private Functions
@@ -159,7 +157,7 @@ void hstimer_init(hstimer_id_t hstimer_id, uint8_t prescaler)
     prescaler &= 0x07;
     hstimer_write_reg(ctrl_off, HSTMR_CTRL_CLK_PRE(prescaler));
     
-    hstimer_clock_hz[hstimer_id] = AHB0_CLK >> prescaler;
+    hstimer_clock_hz[hstimer_id] = CLK_FREQ_AHB0 >> prescaler;
     
     /* Disable interrupt */
     uint32_t irq_en = hstimer_read_reg(HSTMR_IRQ_EN);

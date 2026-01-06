@@ -114,10 +114,10 @@ void ccu_spi_enable(uint8_t spi_id, uint32_t clk_hz, uint32_t pclk_hz)
      */
     uint32_t clk_cfg = CCU_SPI_CLK_EN;
     
-    if (pclk_hz <= 24000000) {
+    if (pclk_hz <= CLK_FREQ_HOSC) {
         /* Use HOSC (24 MHz) */
         clk_cfg |= CCU_SPI_CLK_SRC_HOSC;
-        pclk_hz = 24000000;
+        pclk_hz = CLK_FREQ_HOSC;
     } else {
         /* Use PLL */
         clk_cfg |= CCU_SPI_CLK_SRC_PLL;

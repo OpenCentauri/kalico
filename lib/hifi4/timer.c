@@ -19,7 +19,7 @@ static struct {
     void *arg;
 } timer_handlers[2];
 
-static uint32_t timer_clock_hz[2] = {24000000, 24000000}; /* Default 24 MHz */
+static uint32_t timer_clock_hz[2] = {CLK_FREQ_HOSC, CLK_FREQ_HOSC}; /* Default 24 MHz */
 
 /*============================================================================
  * Private Functions
@@ -130,10 +130,10 @@ void timer_init(timer_id_t timer_id, timer_clk_src_t clk_src, uint8_t prescaler)
     /* Configure clock source */
     if (clk_src == TIMER_CLK_LOSC) {
         ctrl |= TMR_CTRL_CLK_LOSC;
-        timer_clock_hz[timer_id] = 32768;
+        timer_clock_hz[timer_id] = CLK_FREQ_LOSC;
     } else {
         ctrl |= TMR_CTRL_CLK_OSC24M;
-        timer_clock_hz[timer_id] = 24000000;
+        timer_clock_hz[timer_id] = CLK_FREQ_HOSC;
     }
     
     /* Set prescaler (0-7) */
