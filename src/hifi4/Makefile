@@ -51,6 +51,7 @@ src-y += generic/alloc.c
 src-y += generic/serial_irq.c
 
 OBJS_klipper.elf += $(OUT)lib/hifi4/startup.o
+OBJS_klipper.elf += $(OUT)lib/hifi4/vectors.o
 OBJS_klipper.elf += $(OUT)lib/hifi4/oemhead.o
 OBJS_klipper.elf += $(OUT)lib/hifi4/setjmp.o
 
