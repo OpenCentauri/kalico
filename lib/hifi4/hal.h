@@ -78,8 +78,8 @@
 #define PWM_BASE            0x02000C00UL
 
 /* Message Box (for ARM <-> DSP communication) */
-#define MSGBOX_BASE         0x01701000UL    /* DSP MSGBOX base */
-#define MSGBOX_ARM_BASE     0x03003000UL    /* ARM MSGBOX base (for reference) */
+#define MSGBOX_DSP_BASE     0x01701000UL    /* DSP MSGBOX base */
+#define MSGBOX_ARM_BASE     0x03003000UL    /* ARM MSGBOX base */
 
 /*============================================================================
  * CCU (Clock Control Unit) Definitions
@@ -145,8 +145,8 @@
 #define CCU_PWM_RST         BIT(16)
 
 /* MSGBOX BGR register and bits */
-#define CCU_MSGBOX_GATING   BIT(0)
-#define CCU_MSGBOX_RST      BIT(16)
+#define CCU_MSGBOX_GATING   BIT(1)
+#define CCU_MSGBOX_RST      BIT(17)
 
 /* HSTIMER BGR bits */
 #define CCU_HSTIMER_GATING  BIT(0)
@@ -417,6 +417,7 @@ typedef enum {
  */
 
 /* Direct DSP Core interrupts (directly wired to core) */
+#define IRQ_MSGBOX          3       /* Msgbox 0 */
 #define IRQ_DSP_WDOG        16      /* DSP Watchdog */
 #define IRQ_DSP_TZMA        17      /* DSP TZMA */
 #define IRQ_HSTIMER0        18      /* High-speed timer 0 */
@@ -1259,20 +1260,24 @@ void timer_irq_clear(timer_id_t timer_id);
 void hstimer_init(hstimer_id_t hstimer_id, uint8_t prescaler);
 
 /**
- * @brief Start high-speed timer (56-bit counter)
+ * @brief Start high-speed timer in oneshot mode
  * @param hstimer_id HSTimer identifier
- * @param interval_us Interval in microseconds (use _ns variant for nanoseconds)
+ * @param interval_us Interval in microseconds
  * @param handler Callback (NULL for polling)
  * @param arg User argument
  */
-void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t interval_us,
-                           irq_handler_t handler, void *arg);
+void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                           uint32_t ticks_hi, irq_handler_t handler, void *arg);
 
 /**
  * @brief Start high-speed timer in periodic mode
+ * @param hstimer_id HSTimer identifier
+ * @param interval_us Interval in microseconds
+ * @param handler Callback (NULL for polling)
+ * @param arg User argument
  */
-void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t interval_us,
-                            irq_handler_t handler, void *arg);
+void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                            uint32_t ticks_hi, irq_handler_t handler, void *arg);
 
 /**
  * @brief Stop high-speed timer
@@ -1286,6 +1291,16 @@ void hstimer_stop(hstimer_id_t hstimer_id);
  * @param hi Output: upper 24 bits
  */
 void hstimer_get_counter(hstimer_id_t hstimer_id, uint32_t *lo, uint32_t *hi);
+
+/**
+ * @brief Convert microseconds to ticks without 64-bit division
+ * @param hstimer_id HSTimer identifier
+ * @param interval_us Interval in microseconds
+ * @param ticks_lo Output: lower 32 bits of ticks
+ * @param ticks_hi Output: upper 24 bits of ticks
+ */
+void hstimer_us_to_ticks(hstimer_id_t hstimer_id, uint32_t interval_us, 
+                         uint32_t *ticks_lo, uint32_t *ticks_hi);
 
 /*============================================================================
  * Function Prototypes - Watchdog
@@ -1559,8 +1574,13 @@ uint16_t pwm_get_counter(pwm_channel_t channel);
 /* MSGBOX MSG Status bits (MSGBOX_MSG_STATUS register) */
 #define MSGBOX_MSG_NUM_MASK         0x0F    /* Number of messages in FIFO (0-8) */
 
+/* MSGBOX instance */
+#define MSGBOX_LOCAL                0
+#define MSGBOX_REMOTE               1
+
 /* Remote CPU index for DSP <-> ARM communication */
-#define MSGBOX_REMOTE_ARM           0       /* ARM is remote CPU 0 for DSP */
+#define MSGBOX_RECEIVE              0
+#define MSGBOX_TRANSMIT             0
 
 /* Channel numbers */
 #define MSGBOX_CHANNEL_0            0
@@ -1678,6 +1698,83 @@ void msgbox_disable_tx_irq(uint8_t channel);
 void msgbox_flush_rx(uint8_t channel);
 
 /*============================================================================
+ * Cache Management Functions
+ *============================================================================*/
+
+/**
+ * @brief Invalidate a region of data cache
+ * 
+ * Marks cache lines in the specified region as invalid, so subsequent
+ * reads will fetch from main memory. Use this before reading data that
+ * may have been modified by DMA or another processor.
+ * 
+ * @param addr Start address (will be aligned down to cache line)
+ * @param size Size in bytes (will be rounded up to cache line)
+ */
+void dcache_region_invalidate(void *addr, uint32_t size);
+
+/**
+ * @brief Write back a region of data cache to memory
+ * 
+ * Writes any dirty cache lines in the specified region back to main
+ * memory. Use this after writing data that will be read by DMA or
+ * another processor.
+ * 
+ * @param addr Start address (will be aligned down to cache line)
+ * @param size Size in bytes (will be rounded up to cache line)
+ */
+void dcache_region_writeback(void *addr, uint32_t size);
+
+/**
+ * @brief Write back and invalidate a region of data cache
+ * 
+ * Combines writeback and invalidate operations. Use this when the
+ * region will be both written by the CPU and modified externally.
+ * 
+ * @param addr Start address (will be aligned down to cache line)
+ * @param size Size in bytes (will be rounded up to cache line)
+ */
+void dcache_region_writeback_invalidate(void *addr, uint32_t size);
+
+/**
+ * @brief Invalidate entire data cache
+ */
+void dcache_invalidate_all(void);
+
+/**
+ * @brief Write back entire data cache
+ */
+void dcache_writeback_all(void);
+
+/**
+ * @brief Write back and invalidate entire data cache
+ */
+void dcache_writeback_invalidate_all(void);
+
+/**
+ * @brief Invalidate a region of instruction cache
+ * 
+ * Use this after loading new code into memory to ensure the processor
+ * fetches the new instructions.
+ * 
+ * @param addr Start address
+ * @param size Size in bytes
+ */
+void icache_region_invalidate(void *addr, uint32_t size);
+
+/**
+ * @brief Invalidate entire instruction cache
+ */
+void icache_invalidate_all(void);
+
+/**
+ * @brief Synchronize caches and memory
+ * 
+ * Ensures all pending cache operations complete and memory is consistent.
+ */
+void cache_sync(void);
+
+/*============================================================================
  * Debug/Diagnostic Functions
  *============================================================================*/
 
@@ -1715,5 +1812,9 @@ void hal_trigger_soft_interrupt(uint32_t irq_num);
 /* Common delay function (implement based on your timing source) */
 void delay_us(uint32_t us);
 void delay_ms(uint32_t ms);
+
+void hal_debug_hex(uint32_t value);
+void hal_debug_print(const char *str);
+void hal_debug_variable(const char *str, uint32_t value);
 
 #endif /* R528_HIFI4_HAL_H */

@@ -16,7 +16,7 @@ config HIFI4_SELECT
 
 config CLOCK_FREQ
     int
-    default 24000000
+    default 200000000
 
 choice
     prompt "Communication Interface"

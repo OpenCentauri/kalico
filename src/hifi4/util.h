@@ -1,3 +1,6 @@
+#ifndef __HIFI4_UTIL_H
+#define __HIFI4_UTIL_H
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -24,3 +27,5 @@ int strcmp(const char *s1, const char *s2);
 
 int xt_sprintf(char * str, const char * format, ...);
 int xt_printf(const char *format, ...);
+
+#endif // util.h
