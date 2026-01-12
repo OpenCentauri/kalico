@@ -44,14 +44,20 @@ static struct {
  * Private Functions
  *============================================================================*/
 
-static inline void msgbox_write_reg(uint32_t offset, uint32_t value)
+static inline void msgbox_write_reg(bool remote, uint32_t offset, uint32_t value)
 {
-    REG32(MSGBOX_BASE + offset) = value;
+    if (remote)
+        REG32(MSGBOX_ARM_BASE + offset) = value;
+    else
+        REG32(MSGBOX_DSP_BASE + offset) = value;
 }
 
-static inline uint32_t msgbox_read_reg(uint32_t offset)
+static inline uint32_t msgbox_read_reg(bool remote, uint32_t offset)
 {
-    return REG32(MSGBOX_BASE + offset);
+    if (remote)
+        return REG32(MSGBOX_ARM_BASE + offset);
+    else
+        return REG32(MSGBOX_DSP_BASE + offset);
 }
 
 /**
@@ -65,36 +71,36 @@ static void msgbox_irq_handler(uint32_t irq, void *arg)
     (void)arg;
     
     /* Check RX interrupts (messages received from ARM) */
-    uint32_t rd_status = msgbox_read_reg(MSGBOX_RD_IRQ_STATUS(MSGBOX_REMOTE_ARM));
+    uint32_t rd_status = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_STATUS(MSGBOX_RECEIVE));
     
     for (uint8_t ch = 0; ch < MSGBOX_NUM_CHANNELS; ch++) {
         if (rd_status & MSGBOX_RD_IRQ_CH(ch)) {
             /* Clear interrupt by writing 1 */
-            msgbox_write_reg(MSGBOX_RD_IRQ_STATUS(MSGBOX_REMOTE_ARM), MSGBOX_RD_IRQ_CH(ch));
+            msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_STATUS(MSGBOX_RECEIVE), MSGBOX_RD_IRQ_CH(ch));
             
             /* Read all available messages from this channel */
-            uint32_t msg_count = msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, ch)) & MSGBOX_MSG_NUM_MASK;
+            uint32_t msg_count = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, ch)) & MSGBOX_MSG_NUM_MASK;
             
             while (msg_count > 0) {
-                uint32_t message = msgbox_read_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, ch));
+                uint32_t message = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG(MSGBOX_RECEIVE, ch));
                 
                 /* Call user callback if registered */
                 if (msgbox_handlers[ch].rx_callback) {
                     msgbox_handlers[ch].rx_callback(ch, message, msgbox_handlers[ch].arg);
                 }
                 
-                msg_count = msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, ch)) & MSGBOX_MSG_NUM_MASK;
+                msg_count = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, ch)) & MSGBOX_MSG_NUM_MASK;
             }
         }
     }
     
     /* Check TX interrupts (FIFO has space, can send more) */
-    uint32_t wr_status = msgbox_read_reg(MSGBOX_WR_IRQ_STATUS(MSGBOX_REMOTE_ARM));
+    uint32_t wr_status = msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_STATUS(MSGBOX_TRANSMIT));
     
     for (uint8_t ch = 0; ch < MSGBOX_NUM_CHANNELS; ch++) {
         if (wr_status & MSGBOX_WR_IRQ_CH(ch)) {
             /* Clear interrupt by writing 1 */
-            msgbox_write_reg(MSGBOX_WR_IRQ_STATUS(MSGBOX_REMOTE_ARM), MSGBOX_WR_IRQ_CH(ch));
+            msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_STATUS(MSGBOX_TRANSMIT), MSGBOX_WR_IRQ_CH(ch));
             
             /* Call user callback if registered */
             if (msgbox_handlers[ch].tx_callback) {
@@ -121,12 +127,12 @@ void msgbox_init(void)
     }
     
     /* Disable all RX and TX interrupts */
-    msgbox_write_reg(MSGBOX_RD_IRQ_EN(MSGBOX_REMOTE_ARM), 0);
-    msgbox_write_reg(MSGBOX_WR_IRQ_EN(MSGBOX_REMOTE_ARM), 0);
+    msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_EN(MSGBOX_RECEIVE), 0);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_EN(MSGBOX_TRANSMIT), 0);
     
     /* Clear any pending interrupts */
-    msgbox_write_reg(MSGBOX_RD_IRQ_STATUS(MSGBOX_REMOTE_ARM), 0xFFFFFFFF);
-    msgbox_write_reg(MSGBOX_WR_IRQ_STATUS(MSGBOX_REMOTE_ARM), 0xFFFFFFFF);
+    msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_STATUS(MSGBOX_RECEIVE), 0xFFFFFFFF);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_STATUS(MSGBOX_TRANSMIT), 0xFFFFFFFF);
     
     /* Register system IRQ handler */
     irq_register(IRQ_MSGBOX, msgbox_irq_handler, NULL);
@@ -140,13 +146,12 @@ int msgbox_send(uint8_t channel, uint32_t message)
     }
     
     /* Check if FIFO is full */
-    uint32_t fifo_status = msgbox_read_reg(MSGBOX_FIFO_STATUS(MSGBOX_REMOTE_ARM, channel));
-    if (fifo_status & MSGBOX_FIFO_FULL_FLAG) {
+    if (msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_FIFO_STATUS(MSGBOX_TRANSMIT, channel)) & MSGBOX_FIFO_FULL_FLAG) {
         return -1; /* FIFO full */
     }
     
     /* Write message to FIFO */
-    msgbox_write_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, channel), message);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_MSG(MSGBOX_TRANSMIT, channel), message);
     
     return 0;
 }
@@ -158,12 +163,12 @@ void msgbox_send_blocking(uint8_t channel, uint32_t message)
     }
     
     /* Wait until FIFO has space (not full) */
-    while (msgbox_read_reg(MSGBOX_FIFO_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_FIFO_FULL_FLAG) {
+    while (msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_FIFO_STATUS(MSGBOX_TRANSMIT, channel)) & MSGBOX_FIFO_FULL_FLAG) {
         /* Busy wait */
     }
     
     /* Write message */
-    msgbox_write_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, channel), message);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_MSG(MSGBOX_TRANSMIT, channel), message);
 }
 
 int msgbox_recv(uint8_t channel, uint32_t *message)
@@ -173,13 +178,13 @@ int msgbox_recv(uint8_t channel, uint32_t *message)
     }
     
     /* Check if FIFO has data */
-    uint32_t msg_count = msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_MSG_NUM_MASK;
+    uint32_t msg_count = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, channel)) & MSGBOX_MSG_NUM_MASK;
     if (msg_count == 0) {
         return -1; /* FIFO empty */
     }
     
     /* Read message from FIFO */
-    *message = msgbox_read_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, channel));
+    *message = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG(MSGBOX_RECEIVE, channel));
     
     return 0;
 }
@@ -191,11 +196,11 @@ uint32_t msgbox_recv_blocking(uint8_t channel)
     }
     
     /* Wait until FIFO has data */
-    while ((msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_MSG_NUM_MASK) == 0) {
+    while ((msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, channel)) & MSGBOX_MSG_NUM_MASK) == 0) {
         /* Busy wait */
     }
     
-    return msgbox_read_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, channel));
+    return msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG(MSGBOX_RECEIVE, channel));
 }
 
 uint8_t msgbox_rx_pending(uint8_t channel)
@@ -204,7 +209,7 @@ uint8_t msgbox_rx_pending(uint8_t channel)
         return 0;
     }
     
-    return msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_MSG_NUM_MASK;
+    return msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, channel)) & MSGBOX_MSG_NUM_MASK;
 }
 
 bool msgbox_tx_ready(uint8_t channel)
@@ -214,7 +219,7 @@ bool msgbox_tx_ready(uint8_t channel)
     }
     
     /* Ready if FIFO is not full */
-    return (msgbox_read_reg(MSGBOX_FIFO_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_FIFO_FULL_FLAG) == 0;
+    return (msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_FIFO_STATUS(MSGBOX_TRANSMIT, channel)) & MSGBOX_FIFO_FULL_FLAG) == 0;
 }
 
 void msgbox_set_rx_callback(uint8_t channel, msgbox_rx_callback_t callback, void *arg)
@@ -243,9 +248,9 @@ void msgbox_enable_rx_irq(uint8_t channel)
         return;
     }
     
-    uint32_t en = msgbox_read_reg(MSGBOX_RD_IRQ_EN(MSGBOX_REMOTE_ARM));
+    uint32_t en = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_EN(MSGBOX_RECEIVE));
     en |= MSGBOX_RD_IRQ_CH(channel);
-    msgbox_write_reg(MSGBOX_RD_IRQ_EN(MSGBOX_REMOTE_ARM), en);
+    msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_EN(MSGBOX_RECEIVE), en);
 }
 
 void msgbox_disable_rx_irq(uint8_t channel)
@@ -254,9 +259,9 @@ void msgbox_disable_rx_irq(uint8_t channel)
         return;
     }
     
-    uint32_t en = msgbox_read_reg(MSGBOX_RD_IRQ_EN(MSGBOX_REMOTE_ARM));
+    uint32_t en = msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_EN(MSGBOX_RECEIVE));
     en &= ~MSGBOX_RD_IRQ_CH(channel);
-    msgbox_write_reg(MSGBOX_RD_IRQ_EN(MSGBOX_REMOTE_ARM), en);
+    msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_EN(MSGBOX_RECEIVE), en);
 }
 
 void msgbox_enable_tx_irq(uint8_t channel)
@@ -265,9 +270,9 @@ void msgbox_enable_tx_irq(uint8_t channel)
         return;
     }
     
-    uint32_t en = msgbox_read_reg(MSGBOX_WR_IRQ_EN(MSGBOX_REMOTE_ARM));
+    uint32_t en = msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_EN(MSGBOX_TRANSMIT));
     en |= MSGBOX_WR_IRQ_CH(channel);
-    msgbox_write_reg(MSGBOX_WR_IRQ_EN(MSGBOX_REMOTE_ARM), en);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_EN(MSGBOX_TRANSMIT), en);
 }
 
 void msgbox_disable_tx_irq(uint8_t channel)
@@ -276,9 +281,9 @@ void msgbox_disable_tx_irq(uint8_t channel)
         return;
     }
     
-    uint32_t en = msgbox_read_reg(MSGBOX_WR_IRQ_EN(MSGBOX_REMOTE_ARM));
+    uint32_t en = msgbox_read_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_EN(MSGBOX_TRANSMIT));
     en &= ~MSGBOX_WR_IRQ_CH(channel);
-    msgbox_write_reg(MSGBOX_WR_IRQ_EN(MSGBOX_REMOTE_ARM), en);
+    msgbox_write_reg(MSGBOX_REMOTE, MSGBOX_WR_IRQ_EN(MSGBOX_TRANSMIT), en);
 }
 
 void msgbox_flush_rx(uint8_t channel)
@@ -288,10 +293,10 @@ void msgbox_flush_rx(uint8_t channel)
     }
     
     /* Read and discard all messages in the FIFO */
-    while ((msgbox_read_reg(MSGBOX_MSG_STATUS(MSGBOX_REMOTE_ARM, channel)) & MSGBOX_MSG_NUM_MASK) > 0) {
-        (void)msgbox_read_reg(MSGBOX_MSG(MSGBOX_REMOTE_ARM, channel));
+    while ((msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG_STATUS(MSGBOX_RECEIVE, channel)) & MSGBOX_MSG_NUM_MASK) > 0) {
+        (void)msgbox_read_reg(MSGBOX_LOCAL, MSGBOX_MSG(MSGBOX_RECEIVE, channel));
     }
     
     /* Clear any pending RX interrupt */
-    msgbox_write_reg(MSGBOX_RD_IRQ_STATUS(MSGBOX_REMOTE_ARM), MSGBOX_RD_IRQ_CH(channel));
+    msgbox_write_reg(MSGBOX_LOCAL, MSGBOX_RD_IRQ_STATUS(MSGBOX_RECEIVE), MSGBOX_RD_IRQ_CH(channel));
 }

@@ -64,14 +64,16 @@ static uint32_t hstimer_get_irq_bit(hstimer_id_t id)
 
 /**
  * @brief Convert microseconds to ticks without 64-bit division
- * @param clock_hz Timer clock frequency
+ * @param hstimer_id HSTimer identifier
  * @param interval_us Interval in microseconds
  * @param ticks_lo Output: lower 32 bits of ticks
  * @param ticks_hi Output: upper 24 bits of ticks
  */
-static void hstimer_us_to_ticks(uint32_t clock_hz, uint32_t interval_us,
-                                 uint32_t *ticks_lo, uint32_t *ticks_hi)
+void hstimer_us_to_ticks(hstimer_id_t hstimer_id, uint32_t interval_us, 
+                         uint32_t *ticks_lo, uint32_t *ticks_hi)
 {
+    uint32_t clock_hz = hstimer_clock_hz[hstimer_id];
+
     /* ticks = clock_hz * interval_us / 1000000 */
     /* For 24 MHz: ticks_per_us = 24 */
     uint32_t ticks_per_us = clock_hz / 1000000;
@@ -168,16 +170,12 @@ void hstimer_init(hstimer_id_t hstimer_id, uint8_t prescaler)
     hstimer_write_reg(HSTMR_IRQ_STA, hstimer_get_irq_bit(hstimer_id));
 }
 
-void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t interval_us,
-                           irq_handler_t handler, void *arg)
+void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                           uint32_t ticks_hi, irq_handler_t handler, void *arg)
 {
     uint32_t ctrl_off, intv_lo_off, intv_hi_off, cur_lo_off, cur_hi_off;
     hstimer_get_offsets(hstimer_id, &ctrl_off, &intv_lo_off, &intv_hi_off,
                         &cur_lo_off, &cur_hi_off);
-    
-    /* Calculate ticks */
-    uint32_t ticks_lo, ticks_hi;
-    hstimer_us_to_ticks(hstimer_clock_hz[hstimer_id], interval_us, &ticks_lo, &ticks_hi);
     
     /* Stop timer */
     uint32_t ctrl = hstimer_read_reg(ctrl_off);
@@ -215,16 +213,12 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t interval_us,
     hstimer_write_reg(ctrl_off, ctrl);
 }
 
-void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t interval_us,
-                            irq_handler_t handler, void *arg)
+void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                            uint32_t ticks_hi, irq_handler_t handler, void *arg)
 {
     uint32_t ctrl_off, intv_lo_off, intv_hi_off, cur_lo_off, cur_hi_off;
     hstimer_get_offsets(hstimer_id, &ctrl_off, &intv_lo_off, &intv_hi_off,
                         &cur_lo_off, &cur_hi_off);
-    
-    /* Calculate ticks */
-    uint32_t ticks_lo, ticks_hi;
-    hstimer_us_to_ticks(hstimer_clock_hz[hstimer_id], interval_us, &ticks_lo, &ticks_hi);
     
     uint32_t ctrl = hstimer_read_reg(ctrl_off);
     ctrl &= ~HSTMR_CTRL_EN;

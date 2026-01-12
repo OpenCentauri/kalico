@@ -18,7 +18,8 @@ PROVIDE(_memmap_vecbase_reset = 0x00401000);
 SECTIONS
 {
     /* OEM header section at start of IRAM */
-    .oemhead.text 0x00400000 : {
+    .oemhead.text 0x00400000 : ALIGN(4) {
+        _oemhead_text_start = ABSOLUTE(.);
         KEEP(*(.oemhead.text))
     } > iram0 :iram0_phdr
     

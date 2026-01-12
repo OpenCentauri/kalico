@@ -22,7 +22,10 @@
     .set FRAME_A15,     68
     .set FRAME_SAR,     72
     .set FRAME_LEVEL,   76
-    .set FRAME_SIZE,    80  /* 16-byte aligned */
+    .set FRAME_LBEG,    80
+    .set FRAME_LEND,    84
+    .set FRAME_LCOUNT,  88
+    .set FRAME_SIZE,    96  /* Keep 16-byte aligned */
 
     .section ._xt_int_enter.literal, "a"
     .align 4
@@ -69,6 +72,12 @@ _xt_int_enter:
     s32i    a15, a1, FRAME_A15
     rsr     a2, sar
     s32i    a2, a1, FRAME_SAR
+    rsr     a2, lbeg
+    s32i    a2, a1, FRAME_LBEG
+    rsr     a2, lend
+    s32i    a2, a1, FRAME_LEND
+    rsr     a2, lcount
+    s32i    a2, a1, FRAME_LCOUNT
     
     /* Branch based on level */
     beqi    a0, 1, .Llevel1_save
@@ -123,14 +132,28 @@ _xt_int_enter:
     /* fall through */
 
 .Lsave_done:
+    /* Synchronize after all special register reads */
+    rsync
+    memw
+    
     /* Call C interrupt handler with level as argument */
     l32i    a2, a1, FRAME_LEVEL
     l32r    a0, .L_handler
     callx0  a0
 
+    memw
+
     /* Restore all registers */
+    l32i    a2, a1, FRAME_LCOUNT
+    wsr     a2, lcount
+    l32i    a2, a1, FRAME_LBEG
+    wsr     a2, lbeg
+    l32i    a2, a1, FRAME_LEND
+    wsr     a2, lend
     l32i    a2, a1, FRAME_SAR
     wsr     a2, sar
+    isync
+
     l32i    a15, a1, FRAME_A15
     l32i    a14, a1, FRAME_A14
     l32i    a13, a1, FRAME_A13
@@ -243,7 +266,7 @@ _KernelExceptionVector:
     .global _UserExceptionVector
     .align  4
 _UserExceptionVector:
-    wsr     a0, excsave4            /* preserve a0 */
+    wsr     a0, excsave5            /* preserve a0 */
     movi    a0, 5                   /* Interrupt level */
     j       _xt_int_enter
 

@@ -484,7 +484,7 @@ void hal_debug_hex(uint32_t value)
     buf[0] = '0';
     buf[1] = 'x';
     
-    for (int i = 0; i < 8; i++) {
+    for (volatile int i = 0; i < 8; i++) {
         buf[9 - i] = hex_chars[value & 0xF];
         value >>= 4;
     }
@@ -500,4 +500,181 @@ void hal_debug_hex(uint32_t value)
 void hal_debug_print(const char *str)
 {
     uart_puts(UART_0, str);
+}
+
+/**
+ * @brief Print a string and a hexadecimal number via UART0
+ * @param str String to print
+ */
+void hal_debug_variable(const char *str, uint32_t value)
+{
+    uart_puts(UART_0, str);
+    hal_debug_hex(value);
+    uart_puts(UART_0, "\n");
+}
+
+/*============================================================================
+ * Cache Management Functions
+ * 
+ * HiFi4 DSP typically has:
+ * - 64-byte cache lines (may vary by configuration)
+ * - Separate I-cache and D-cache
+ * - DHI (Data cache Hit Invalidate), DHWB (Data cache Hit Writeback),
+ *   DHWBI (Data cache Hit Writeback Invalidate) instructions
+ *============================================================================*/
+
+/* Cache line size - typically 64 bytes on HiFi4, but can be 16 or 32 */
+#ifndef DCACHE_LINE_SIZE
+#define DCACHE_LINE_SIZE    64
+#endif
+
+#ifndef ICACHE_LINE_SIZE
+#define ICACHE_LINE_SIZE    64
+#endif
+
+/**
+ * @brief Invalidate a region of data cache
+ */
+void dcache_region_invalidate(void *addr, uint32_t size)
+{
+    uint32_t start = (uint32_t)addr;
+    uint32_t end = start + size;
+    
+    /* Align start down to cache line boundary */
+    start &= ~(DCACHE_LINE_SIZE - 1);
+    
+    /* Invalidate each cache line in the region */
+    for (uint32_t line = start; line < end; line += DCACHE_LINE_SIZE) {
+        __asm__ volatile("dhi %0, 0" :: "a"(line));
+    }
+    
+    /* Memory barrier to ensure completion */
+    __asm__ volatile("dsync");
+}
+
+/**
+ * @brief Write back a region of data cache to memory
+ */
+void dcache_region_writeback(void *addr, uint32_t size)
+{
+    uint32_t start = (uint32_t)addr;
+    uint32_t end = start + size;
+    
+    /* Align start down to cache line boundary */
+    start &= ~(DCACHE_LINE_SIZE - 1);
+    
+    /* Write back each cache line in the region */
+    for (uint32_t line = start; line < end; line += DCACHE_LINE_SIZE) {
+        __asm__ volatile("dhwb %0, 0" :: "a"(line));
+    }
+    
+    /* Memory barrier to ensure completion */
+    __asm__ volatile("dsync");
+}
+
+/**
+ * @brief Write back and invalidate a region of data cache
+ */
+void dcache_region_writeback_invalidate(void *addr, uint32_t size)
+{
+    uint32_t start = (uint32_t)addr;
+    uint32_t end = start + size;
+    
+    /* Align start down to cache line boundary */
+    start &= ~(DCACHE_LINE_SIZE - 1);
+    
+    /* Write back and invalidate each cache line in the region */
+    for (uint32_t line = start; line < end; line += DCACHE_LINE_SIZE) {
+        __asm__ volatile("dhwbi %0, 0" :: "a"(line));
+    }
+    
+    /* Memory barrier to ensure completion */
+    __asm__ volatile("dsync");
+}
+
+/**
+ * @brief Invalidate entire data cache
+ */
+void dcache_invalidate_all(void)
+{
+    /* 
+     * For full cache invalidation, we need to know the cache size.
+     * This is a simplified version that may not cover all cache ways.
+     * A more robust implementation would use XCHAL_DCACHE_SIZE from
+     * the Xtensa configuration headers.
+     */
+    __asm__ volatile(
+        "movi   a2, 0\n"
+        "dii    a2, 0\n"
+        "dsync\n"
+        ::: "a2", "memory"
+    );
+}
+
+/**
+ * @brief Write back entire data cache
+ */
+void dcache_writeback_all(void)
+{
+    /* 
+     * Full cache writeback requires iterating over all cache lines.
+     * This is a simplified version using dsync to ensure pending
+     * writes complete.
+     */
+    __asm__ volatile("dsync" ::: "memory");
+}
+
+/**
+ * @brief Write back and invalidate entire data cache
+ */
+void dcache_writeback_invalidate_all(void)
+{
+    /* Simplified version - writeback then invalidate */
+    dcache_writeback_all();
+    dcache_invalidate_all();
+}
+
+/**
+ * @brief Invalidate a region of instruction cache
+ */
+void icache_region_invalidate(void *addr, uint32_t size)
+{
+    uint32_t start = (uint32_t)addr;
+    uint32_t end = start + size;
+    
+    /* Align start down to cache line boundary */
+    start &= ~(ICACHE_LINE_SIZE - 1);
+    
+    /* Invalidate each cache line in the region */
+    for (uint32_t line = start; line < end; line += ICACHE_LINE_SIZE) {
+        __asm__ volatile("ihi %0, 0" :: "a"(line));
+    }
+    
+    /* Instruction sync to ensure completion */
+    __asm__ volatile("isync");
+}
+
+/**
+ * @brief Invalidate entire instruction cache
+ */
+void icache_invalidate_all(void)
+{
+    __asm__ volatile(
+        "movi   a2, 0\n"
+        "iii    a2, 0\n"
+        "isync\n"
+        ::: "a2", "memory"
+    );
+}
+
+/**
+ * @brief Synchronize caches and memory
+ */
+void cache_sync(void)
+{
+    __asm__ volatile(
+        "dsync\n"
+        "isync\n"
+        ::: "memory"
+    );
 }
