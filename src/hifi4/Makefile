@@ -27,6 +27,7 @@ src-y += hifi4/util.c
 src-y += hifi4/gpio.c
 src-y += hifi4/irq.c
 src-y += hifi4/timer.c
+src-y += hifi4/log.c
 src-$(CONFIG_SERIAL) += hifi4/serial.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/msgbox.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/usb_bulk.c

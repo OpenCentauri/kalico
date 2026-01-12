@@ -133,15 +133,3 @@ int strcmp(const char *s1, const char *s2)
             return (0);
     return (*(const unsigned char *)s1 - *(const unsigned char *)(s2 - 1));
 }
-
-// Todo: Implement this
-int xt_sprintf(char * str, const char * format, ...)
-{
-    return 0;
-}
-
-// Todo: Implement this
-int xt_printf(const char *format, ...)
-{
-    return 0;
-}
