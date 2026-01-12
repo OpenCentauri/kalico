@@ -25,7 +25,4 @@ void *malloc(size_t size);
 
 int strcmp(const char *s1, const char *s2);
 
-int xt_sprintf(char * str, const char * format, ...);
-int xt_printf(const char *format, ...);
-
 #endif // util.h
