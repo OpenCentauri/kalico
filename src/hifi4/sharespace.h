@@ -39,6 +39,5 @@ void sharespace_init(void);
 void sharespace_clear(void);
 int sharespace_write(const void* data, int len);
 int sharespace_read(void* out_buffer, int max_len);
-int do_read_space(uint8_t* buf, uint32_t size);
 
 #endif // sharespace.h
