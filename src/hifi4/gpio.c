@@ -10,9 +10,18 @@
 #include "command.h"
 #include "sched.h" // sched_shutdown
 
+DECL_ENUMERATION_RANGE("pin", "PB0", 1*32, 16); //13 + 3 ADC pins
+DECL_ENUMERATION_RANGE("pin", "PC0", 2*32, 8);
+DECL_ENUMERATION_RANGE("pin", "PD0", 3*32, 23);
+DECL_ENUMERATION_RANGE("pin", "PE0", 4*32, 18);
+DECL_ENUMERATION_RANGE("pin", "PF0", 5*32, 7);
+DECL_ENUMERATION_RANGE("pin", "PG0", 6*32, 19);
+
 struct gpio_out gpio_out_setup(uint8_t pin, uint8_t val) {
     gpio_init();
-    gpio_pin_t gpio_pin = GPIO_PIN(GPIO_PORT_D, 22);
+    uint8_t port = pin / 32;
+    uint8_t pad = pin % 32;
+    gpio_pin_t gpio_pin = GPIO_PIN(port, pad);
     struct gpio_out g = { .pin=gpio_pin };
     gpio_out_reset(g, val);
     return g;
@@ -34,13 +43,15 @@ void gpio_out_write(struct gpio_out g, uint8_t val) {
 }
 struct gpio_in gpio_in_setup(uint8_t pin, int8_t pull_up) {
     gpio_init();
-    gpio_pin_t gpio_pin = GPIO_PIN(GPIO_PORT_D, 22);
+    uint8_t port = pin / 32;
+    uint8_t pad = pin % 32;
+    gpio_pin_t gpio_pin = GPIO_PIN(port, pad);
     struct gpio_in g = { .pin=gpio_pin };
     gpio_in_reset(g, pull_up);
     return g;
 }
 void gpio_in_reset(struct gpio_in g, int8_t pull_up) {
-    gpio_set_mode(g.pin, GPIO_MODE_OUTPUT);
+    gpio_set_mode(g.pin, GPIO_MODE_INPUT);
     gpio_set_pull(g.pin, pull_up ? GPIO_PULL_UP : GPIO_PULL_NONE);
 }
 uint8_t gpio_in_read(struct gpio_in g) {
