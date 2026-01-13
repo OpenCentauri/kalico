@@ -71,3 +71,20 @@ void lprintf(const char *str) {
 
     *log_write_ptr = current_write_pos + len + 1;
 }
+
+void lprint_hex(uint32_t value)
+{
+    static const char hex_chars[] = "0123456789ABCDEF";
+    char buf[11];
+    
+    buf[0] = '0';
+    buf[1] = 'x';
+    
+    for (volatile int i = 0; i < 8; i++) {
+        buf[9 - i] = hex_chars[value & 0xF];
+        value >>= 4;
+    }
+    buf[10] = '\0';
+    
+    lprintf(buf);
+}

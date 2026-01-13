@@ -5,18 +5,16 @@
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
 #include <hal.h>
-#include "generic/usb_cdc.h" // usb_notify_bulk_out
+#include "com.h" // sharespace_consume
 #include "sched.h" // DECL_INIT
-
-uint16_t msgbox_new_msg[2];
+#include "log.h" // lprintf
 
 static void
 msgbox_rx_callback(uint8_t channel, uint32_t message, void *arg)
 {
-    hal_debug_print("msgbox_rx_callback\n");
-    msgbox_new_msg[0] = (uint16_t)((message << 16) >> 16);
-	msgbox_new_msg[1] = (uint16_t)(message >> 16);
-	usb_notify_bulk_out();
+    // hal_debug_print("msgbox_rx_callback\n");
+    // lprintf("msgbox_rx_callback\n");
+	sharespace_consume();
 }
 
 void
@@ -30,6 +28,7 @@ DECL_INIT(msgbox_hw_init);
 
 void msgbox_send_signal(uint32_t data)
 {
-    hal_debug_print("msgbox_send_signal\n");
+    // hal_debug_print("msgbox_send_signal\n");
+    // lprintf("msgbox_send_signal\n");
     msgbox_send(MSGBOX_CHANNEL_3, data);
 }

@@ -48,7 +48,7 @@ timer_set(uint32_t next)
 void
 timer_kick(void)
 {
-    timer_set(timer_from_us(2));
+    timer_set(5);
 }
 
 void timer_reset(void)
