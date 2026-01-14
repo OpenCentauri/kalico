@@ -3,6 +3,6 @@
 
 #include <stdint.h> // uint32_t
 
-void sharespace_consume(void);
+void sharespace_notify_consume(void);
 
 #endif // com.h

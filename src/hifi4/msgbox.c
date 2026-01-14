@@ -14,7 +14,7 @@ msgbox_rx_callback(uint8_t channel, uint32_t message, void *arg)
 {
     // hal_debug_print("msgbox_rx_callback\n");
     // lprintf("msgbox_rx_callback\n");
-	sharespace_consume();
+	sharespace_notify_consume();
 }
 
 void
