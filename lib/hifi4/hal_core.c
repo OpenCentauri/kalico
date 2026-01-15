@@ -411,13 +411,10 @@ void hal_irq_dispatch(void)
  * For accurate timing, use a hardware timer.
  */
 
-/* Assumed DSP clock frequency (adjust as needed) */
-#define DSP_CLOCK_HZ    600000000UL  /* 600 MHz typical */
-
 void delay_us(uint32_t us)
 {
     /* Approximate cycles per microsecond */
-    uint32_t cycles = (DSP_CLOCK_HZ / 1000000UL) * us;
+    uint32_t cycles = (CLK_FREQ_HOSC / 1000000UL) * us;
     
     /* Simple loop - each iteration is roughly 4 cycles */
     volatile uint32_t i;

@@ -80,7 +80,7 @@ static void sharespace_reinit(MsgHead *p_arm_head) {
         // hal_debug_variable("sharespace_reinit: arm_head.write_addr = ", p_arm_head->write_addr);
         // hal_debug_variable("sharespace_reinit: arm_head.read_addr  = ", p_arm_head->read_addr);
 
-        if (p_arm_head->init_state == 1 &&
+        if (p_arm_head->init_state == 2 &&
             p_arm_head->write_addr != 0xa5a5a5a5 &&
             p_arm_head->read_addr != 0xa5a5a5a5) {
 
@@ -96,13 +96,14 @@ static void sharespace_reinit(MsgHead *p_arm_head) {
 void sharespace_init(void) {
     // hal_debug_print("sharespace_init: Starting initialization.\n");
     sharespace_get_config(&dts_sharespace);
+    sharespace_fake_init();
     sharespace_clear();
     // hal_debug_print("sharespace_init: Got config from DTS.\n");
     // hal_debug_variable("sharespace_init: dsp_write_addr = ", dts_sharespace.dsp_write_addr);
     // hal_debug_variable("sharespace_init: arm_write_addr = ", dts_sharespace.arm_write_addr);
 
     // Temporarily point to the initial handshake location in the DTS-defined sharespace
-    arm_head_ptr = (volatile MsgHead*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET);
+    // arm_head_ptr = (volatile MsgHead*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET);
     // hal_debug_variable("sharespace_init: arm_head_ptr initially set to ", (uint32_t)arm_head_ptr);
 
     // hal_debug_print("sharespace_init: Calling sharespace_reinit() to get kbuf addresses.\n");
@@ -168,14 +169,14 @@ void sharespace_clear(void) {
     sharespace_get_config(&dts_sharespace);
     memset((void*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET), 0xa5, sizeof(MsgHead));
 
-    // MsgHead arm_head;
-    // memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
-    // arm_head.init_state = 2;
-    // // hal_debug_variable("sharespace_clear: Initializing ARM head: read_addr  = ", arm_head.read_addr);
-    // // hal_debug_variable("sharespace_clear: Initializing ARM head: write_addr = ", arm_head.write_addr);
-    // // hal_debug_variable("sharespace_clear: Initializing ARM head: init_state = ", arm_head.init_state);
-    // memcpy((void*)arm_head_ptr, &arm_head, sizeof(MsgHead));
-    // // hal_debug_variable("sharespace_clear: Wrote ARM head to ", (uint32_t)arm_head_ptr);
+    MsgHead arm_head;
+    memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
+    arm_head.init_state = 2;
+    // hal_debug_variable("sharespace_clear: Initializing ARM head: read_addr  = ", arm_head.read_addr);
+    // hal_debug_variable("sharespace_clear: Initializing ARM head: write_addr = ", arm_head.write_addr);
+    // hal_debug_variable("sharespace_clear: Initializing ARM head: init_state = ", arm_head.init_state);
+    memcpy((void*)arm_head_ptr, &arm_head, sizeof(MsgHead));
+    // hal_debug_variable("sharespace_clear: Wrote ARM head to ", (uint32_t)arm_head_ptr);
 }
 
 int sharespace_write(const void* data, int len) {
