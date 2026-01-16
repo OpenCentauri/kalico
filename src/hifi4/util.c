@@ -10,10 +10,6 @@
 #define UART_THR  (*(volatile uint32_t*)(UART_BASE + 0x00))
 #define UART_LSR  (*(volatile uint32_t*)(UART_BASE + 0x14))
 
-/* External symbols from linker */
-extern uint8_t _heap_start;
-extern uint8_t _heap_end;
-
 void *memcpy(void *restrict dest, const void *restrict src, size_t n){
     volatile uint8_t *d = (volatile uint8_t*)dest;
     volatile const uint8_t *s = (volatile const uint8_t*)src;
@@ -85,45 +81,6 @@ void set_bit(uint32_t addr, uint8_t bit){
 
 void clear_bit(uint32_t addr, uint8_t bit){
   write_reg(addr, read_reg(addr) & ~(1<<bit));
-}
-
-/* Simple bump allocator */
-static size_t heap_offset = 0;
-
-void *malloc(size_t size) {
-    if (size == 0) {
-        return NULL;
-    }
-
-    /* Align to 8 bytes for safety */
-    const uint32_t alignment = 8;
-    uint32_t aligned_size = (size + (alignment - 1)) & ~(alignment - 1);
-
-    /* Calculate heap size */
-    uint32_t heap_size = (uint32_t)(&_heap_end - &_heap_start);
-    
-    /* Check if we have enough space */
-    if ((heap_offset + aligned_size) > heap_size) {
-        // print("    [malloc] Out of memory! offset=");
-        // print_hex(heap_offset);
-        // print(", aligned_size=");
-        // print_hex(aligned_size);
-        // print(", heap_size=");
-        // print_hex(heap_size);
-        // print("\n");
-        return NULL;
-    }
-
-    /* Get pointer and update offset */
-    void *ptr = &(&_heap_start)[heap_offset];
-    heap_offset += aligned_size;
-    
-    return ptr;
-}
-
-void
-free (void * free_p)
-{
 }
 
 int strcmp(const char *s1, const char *s2)

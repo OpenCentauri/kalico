@@ -22,6 +22,7 @@ ASFLAGS += -Wa,--abi-call0
 ASFLAGS += -Ilib/hifi4
 
 # Add source files
+src-y += hifi4/alloc.c
 src-y += hifi4/main.c
 src-y += hifi4/util.c
 src-y += hifi4/gpio.c
@@ -51,7 +52,6 @@ src-$(CONFIG_HIFI4_WATCHDOG) += ../lib/hifi4/watchdog.c
 # generic
 src-y += generic/timer_irq.c
 src-y += generic/crc16_ccitt.c
-src-y += generic/alloc.c
 src-$(CONFIG_SERIAL) += generic/serial_irq.c
 
 OBJS_klipper.elf += $(OUT)lib/hifi4/startup.o

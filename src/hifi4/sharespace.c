@@ -5,6 +5,7 @@
 #include "msgbox.h"
 #include "util.h"
 #include "sched.h" // DECL_INIT
+#include "log.h"
 
 // Pointers to the shared memory regions.
 static volatile uint8_t* dsp_reads_from_arm = NULL; // ARM writes here, DSP reads from here.
@@ -13,11 +14,6 @@ static volatile uint8_t* dsp_writes_to_arm = NULL;  // DSP writes here, ARM read
 // Head pointers for the two buffers.
 static volatile MsgHead* arm_head_ptr = NULL;   // Head for the ARM->DSP buffer.
 static volatile MsgHead* dsp_head_ptr = NULL;   // Head for the DSP->ARM buffer.
-
-// Address to track the arm and dsp read/write location
-uint16_t sharespace_arm_addr[2];
-uint16_t sharespace_dsp_addr[2];
-uint16_t sharespace_log_addr[2];
 
 // Global instance to store the discovered shared space parameters
 static struct dts_sharespace_t dts_sharespace;
@@ -32,13 +28,34 @@ extern void rpmsg_signal_host(uint32_t msg);
 static void sharespace_get_config(struct dts_sharespace_t *p_dts_sharespace) {
     volatile struct spare_rtos_head_t *pstr = platform_head;
     volatile struct dts_msg_t *pdts = &pstr->rtos_img_hdr.dts_msg;
-    if (pdts->dts_sharespace.status == DTS_OPEN) {
-        p_dts_sharespace->dsp_write_addr = pdts->dts_sharespace.dsp_write_addr;
-        p_dts_sharespace->dsp_write_size = pdts->dts_sharespace.dsp_write_size;
-        p_dts_sharespace->arm_write_addr = pdts->dts_sharespace.arm_write_addr;
-        p_dts_sharespace->arm_write_size = pdts->dts_sharespace.arm_write_size;
-        p_dts_sharespace->dsp_log_addr = pdts->dts_sharespace.dsp_log_addr;
-        p_dts_sharespace->dsp_log_size = pdts->dts_sharespace.dsp_log_size;
+    dcache_region_invalidate((void*)pstr, sizeof(struct spare_rtos_head_t));
+    hal_debug_print("Initial DTS Sharespace Configuration:\n");
+    hal_debug_variable("  Status:             ", pdts->dts_sharespace.status);
+    hal_debug_variable("  DSP Write Address:  ", pdts->dts_sharespace.dsp_write_addr);
+    hal_debug_variable("  DSP Write Size:     ", pdts->dts_sharespace.dsp_write_size);
+    hal_debug_variable("  ARM Write Address:  ", pdts->dts_sharespace.arm_write_addr);
+    hal_debug_variable("  ARM Write Size:     ", pdts->dts_sharespace.arm_write_size);
+    hal_debug_variable("  DSP Log Address:    ", pdts->dts_sharespace.dsp_log_addr);
+    hal_debug_variable("  DSP Log Size:       ", pdts->dts_sharespace.dsp_log_size);
+    while (1) {
+        dcache_region_invalidate((void*)pstr, sizeof(struct spare_rtos_head_t));
+        if (pdts->dts_sharespace.status == DTS_OPEN) {
+            p_dts_sharespace->dsp_write_addr = pdts->dts_sharespace.dsp_write_addr;
+            p_dts_sharespace->dsp_write_size = pdts->dts_sharespace.dsp_write_size;
+            p_dts_sharespace->arm_write_addr = pdts->dts_sharespace.arm_write_addr;
+            p_dts_sharespace->arm_write_size = pdts->dts_sharespace.arm_write_size;
+            p_dts_sharespace->dsp_log_addr = pdts->dts_sharespace.dsp_log_addr;
+            p_dts_sharespace->dsp_log_size = pdts->dts_sharespace.dsp_log_size;
+            hal_debug_print("Final DTS Sharespace Configuration:\n");
+            hal_debug_variable("  Status:             ", pdts->dts_sharespace.status);
+            hal_debug_variable("  DSP Write Address:  ", pdts->dts_sharespace.dsp_write_addr);
+            hal_debug_variable("  DSP Write Size:     ", pdts->dts_sharespace.dsp_write_size);
+            hal_debug_variable("  ARM Write Address:  ", pdts->dts_sharespace.arm_write_addr);
+            hal_debug_variable("  ARM Write Size:     ", pdts->dts_sharespace.arm_write_size);
+            hal_debug_variable("  DSP Log Address:    ", pdts->dts_sharespace.dsp_log_addr);
+            hal_debug_variable("  DSP Log Size:       ", pdts->dts_sharespace.dsp_log_size);
+            return;
+        }
     }
 }
 
@@ -75,17 +92,26 @@ static void sharespace_reinit(MsgHead *p_arm_head) {
     delay_us(10000); // sleep 10 seconds before looping
     while (1) {
         // hal_debug_variable("sharespace_reinit: Reading ARM head from ", (uint32_t)arm_head_ptr);
+        dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
         memcpy(p_arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
         // hal_debug_variable("sharespace_reinit: arm_head.init_state = ", p_arm_head->init_state);
         // hal_debug_variable("sharespace_reinit: arm_head.write_addr = ", p_arm_head->write_addr);
         // hal_debug_variable("sharespace_reinit: arm_head.read_addr  = ", p_arm_head->read_addr);
 
-        if (p_arm_head->init_state == 2 &&
+        if ((p_arm_head->init_state == 1 || p_arm_head->init_state == 2) &&
             p_arm_head->write_addr != 0xa5a5a5a5 &&
             p_arm_head->read_addr != 0xa5a5a5a5) {
 
-            // hal_debug_variable("sharespace_reinit: ARM is initialized state = ", p_arm_head->init_state);
-            // hal_debug_print("sharespace_reinit: Sync complete.\n");
+            if (p_arm_head->init_state == 2) {
+                p_arm_head->init_state = 1;
+                memcpy((void*)arm_head_ptr, p_arm_head, sizeof(MsgHead));
+                dcache_region_writeback((void*)arm_head_ptr, sizeof(MsgHead));
+            }
+
+            hal_debug_variable("sharespace_reinit: arm_head.init_state = ", p_arm_head->init_state);
+            hal_debug_variable("sharespace_reinit: arm_head.write_addr = ", p_arm_head->write_addr);
+            hal_debug_variable("sharespace_reinit: arm_head.read_addr  = ", p_arm_head->read_addr);
+            hal_debug_print("sharespace_reinit: Sync complete.\n");
             return;
         }
         delay_us(2000); // sleep 2 seconds between iterations
@@ -96,15 +122,16 @@ static void sharespace_reinit(MsgHead *p_arm_head) {
 void sharespace_init(void) {
     // hal_debug_print("sharespace_init: Starting initialization.\n");
     sharespace_get_config(&dts_sharespace);
-    sharespace_fake_init();
+    // sharespace_fake_init();
+
+    // Temporarily point to the initial handshake location in the DTS-defined sharespace
+    arm_head_ptr = (volatile MsgHead*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET);
+    // hal_debug_variable("sharespace_init: arm_head_ptr initially set to ", (uint32_t)arm_head_ptr);
+
     sharespace_clear();
     // hal_debug_print("sharespace_init: Got config from DTS.\n");
     // hal_debug_variable("sharespace_init: dsp_write_addr = ", dts_sharespace.dsp_write_addr);
     // hal_debug_variable("sharespace_init: arm_write_addr = ", dts_sharespace.arm_write_addr);
-
-    // Temporarily point to the initial handshake location in the DTS-defined sharespace
-    // arm_head_ptr = (volatile MsgHead*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET);
-    // hal_debug_variable("sharespace_init: arm_head_ptr initially set to ", (uint32_t)arm_head_ptr);
 
     // hal_debug_print("sharespace_init: Calling sharespace_reinit() to get kbuf addresses.\n");
     MsgHead initial_arm_head;
@@ -145,18 +172,17 @@ void sharespace_init(void) {
     // hal_debug_variable("sharespace_init: Flushed cache for DSP head region at ", (uint32_t)dsp_head_ptr);
     // hal_debug_variable("    size ", sizeof(MsgHead));
 
-    // msgbox_send_signal((dsp_head.write_addr<<16) + dsp_head.read_addr);
+    msgbox_send_signal((dsp_head.write_addr<<16) + dsp_head.read_addr);
 
     MsgHead arm_head;
     // hal_debug_print("sharespace_init: Waiting for ARM to acknowledge with init_state=1.\n");
     while (1) {
+        dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
         memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
         // hal_debug_variable("sharespace_init: Polling ARM head (from kbuf): init_state = ", arm_head.init_state);
         if (arm_head.init_state == 1) {
-            sharespace_arm_addr[SHARESPACE_READ] = arm_head.read_addr;
-            sharespace_arm_addr[SHARESPACE_WRITE] = arm_head.write_addr;
-            // hal_debug_variable("sharespace_init: ARM acknowledged. read_addr  = ", sharespace_arm_addr[SHARESPACE_READ]);
-            // hal_debug_variable("sharespace_init: ARM acknowledged. write_addr = ", sharespace_arm_addr[SHARESPACE_WRITE]);
+            // hal_debug_variable("sharespace_init: ARM acknowledged. read_addr  = ", arm_head.read_addr);
+            // hal_debug_variable("sharespace_init: ARM acknowledged. write_addr = ", arm_head.write_addr);
             break;
         }
     }
@@ -166,17 +192,17 @@ DECL_INIT(sharespace_init);
 
 // Invalidates the ARM's message head in shared memory.
 void sharespace_clear(void) {
-    sharespace_get_config(&dts_sharespace);
-    memset((void*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET), 0xa5, sizeof(MsgHead));
+    memset((void*)arm_head_ptr, 0xa5, sizeof(MsgHead));
+    dcache_region_writeback((void*)arm_head_ptr, sizeof(MsgHead));
 
-    MsgHead arm_head;
-    memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
-    arm_head.init_state = 2;
-    // hal_debug_variable("sharespace_clear: Initializing ARM head: read_addr  = ", arm_head.read_addr);
-    // hal_debug_variable("sharespace_clear: Initializing ARM head: write_addr = ", arm_head.write_addr);
-    // hal_debug_variable("sharespace_clear: Initializing ARM head: init_state = ", arm_head.init_state);
-    memcpy((void*)arm_head_ptr, &arm_head, sizeof(MsgHead));
-    // hal_debug_variable("sharespace_clear: Wrote ARM head to ", (uint32_t)arm_head_ptr);
+    // MsgHead arm_head;
+    // memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
+    // arm_head.init_state = 2;
+    // // hal_debug_variable("sharespace_clear: Initializing ARM head: read_addr  = ", arm_head.read_addr);
+    // // hal_debug_variable("sharespace_clear: Initializing ARM head: write_addr = ", arm_head.write_addr);
+    // // hal_debug_variable("sharespace_clear: Initializing ARM head: init_state = ", arm_head.init_state);
+    // memcpy((void*)arm_head_ptr, &arm_head, sizeof(MsgHead));
+    // // hal_debug_variable("sharespace_clear: Wrote ARM head to ", (uint32_t)arm_head_ptr);
 }
 
 int sharespace_write(const void* data, int len) {
@@ -190,6 +216,9 @@ int sharespace_write(const void* data, int len) {
 
     uint32_t host_read_addr = arm_head.read_addr; // ARM's read position in DSP->ARM buffer
     uint32_t local_write_addr = dsp_head.write_addr;
+
+    // Test using arm read addr from msg
+    // host_read_addr = msgbox_new_msg[0];
 
     // hal_debug_variable("sharespace_write: host_read_addr   = ", host_read_addr);
     // hal_debug_variable("sharespace_write: local_write_addr = ", local_write_addr);
@@ -205,7 +234,7 @@ int sharespace_write(const void* data, int len) {
     // hal_debug_variable("sharespace_write: free_size = ", free_size);
 
     if (free_size <= len) {
-        hal_debug_print("sharespace_write: buffer full, cannot write\n");
+        lprintf("sharespace_write: buffer full, cannot write\n");
         return -1;
     }
 
@@ -255,7 +284,7 @@ int sharespace_read(void* out_buffer, int max_len) {
     // hal_debug_variable("sharespace_read: local_read_addr = ", local_read_addr);
 
     if (local_read_addr == host_write_addr) {
-        // hal_debug_print("sharespace_read: no data available\n");
+        lprintf("sharespace_read: no data available\n");
         return 0;
     }
 
@@ -292,6 +321,8 @@ int sharespace_read(void* out_buffer, int max_len) {
 
     // hal_debug_variable("sharespace_read: number of read bytes ", bytes_to_copy);
     // hal_debug_variable("sharespace_read: new read_addr = ", dsp_head.read_addr);
+
+    // msgbox_send_signal((dsp_head.write_addr<<16) + dsp_head.read_addr);
 
     return bytes_to_copy;
 }

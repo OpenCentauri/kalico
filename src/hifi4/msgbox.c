@@ -9,12 +9,16 @@
 #include "sched.h" // DECL_INIT
 #include "log.h" // lprintf
 
+static uint16_t msgbox_new_msg[2];
+
 static void
 msgbox_rx_callback(uint8_t channel, uint32_t message, void *arg)
 {
     // hal_debug_print("msgbox_rx_callback\n");
     // lprintf("msgbox_rx_callback\n");
-	sharespace_notify_consume();
+    msgbox_new_msg[0] = (uint16_t)((message << 16) >> 16);
+    msgbox_new_msg[1] = (uint16_t)(message >> 16);
+    sharespace_notify_consume();
 }
 
 void
