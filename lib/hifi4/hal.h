@@ -62,7 +62,7 @@
 #define HSTIMER_BASE        0x03008000UL
 
 /* Watchdog */
-#define WDOG_BASE           0x02050020UL
+#define WDOG_BASE           0x01700400UL
 
 /* I2C/TWI Controllers */
 #define TWI0_BASE           0x02502000UL
@@ -985,14 +985,31 @@ typedef enum {
 #define WDOG_CTRL_RESTART       BIT(0)          /* Restart/kick watchdog */
 
 /* Watchdog Configuration bits */
+#define WDOG_CFG_KEY            (0x16AA << 16)  /* Access key */
 #define WDOG_CFG_CONFIG_MASK    0x03
-#define WDOG_CFG_SYS_RESET      1   /* Generate system reset */
-#define WDOG_CFG_IRQ_ONLY       2   /* Generate IRQ only */
+#define WDOG_CFG_SYS_RESET      1               /* Generate system reset */
+#define WDOG_CFG_IRQ_ONLY       2               /* Generate IRQ only */
 
 /* Watchdog Mode bits */
+#define WDOG_MODE_KEY           (0x16AA << 16)  /* Access key */
 #define WDOG_MODE_EN            BIT(0)
 #define WDOG_MODE_INTV_MASK     (0xF << 4)
-#define WDOG_MODE_INTV(n)       ((n) << 4)  /* Interval: (n+1) * 0.5s */
+#define WDOG_MODE_INTV(n)       ((n) << 4)      /* Interval: (n+1) * 0.5s */
+
+typedef enum {
+    WDOG_INTV_0_5_SEC   = 0x00,
+    WDOG_INTV_1_SEC     = 0x01,
+    WDOG_INTV_2_SEC     = 0x02,
+    WDOG_INTV_3_SEC     = 0x03,
+    WDOG_INTV_4_SEC     = 0x04,
+    WDOG_INTV_5_SEC     = 0x05,
+    WDOG_INTV_6_SEC     = 0x06,
+    WDOG_INTV_8_SEC     = 0x07,
+    WDOG_INTV_10_SEC    = 0x08,
+    WDOG_INTV_12_SEC    = 0x09,
+    WDOG_INTV_14_SEC    = 0x0A,
+    WDOG_INTV_16_SEC    = 0x0B
+} wdog_intv_t;
 
 /*============================================================================
  * I2C/TWI Definitions
@@ -1308,10 +1325,10 @@ void hstimer_us_to_ticks(hstimer_id_t hstimer_id, uint32_t interval_us,
 
 /**
  * @brief Initialize watchdog timer
- * @param timeout_ms Timeout in milliseconds (rounded to nearest 0.5s interval)
+ * @param interval Interval value for watchdog
  * @param reset_on_timeout true to reset system, false for IRQ only
  */
-void watchdog_init(uint32_t timeout_ms, bool reset_on_timeout);
+void watchdog_init(wdog_intv_t interval, bool reset_on_timeout);
 
 /**
  * @brief Start the watchdog

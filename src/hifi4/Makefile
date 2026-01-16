@@ -32,6 +32,7 @@ src-$(CONFIG_SERIAL) += hifi4/serial.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/msgbox.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/com.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/sharespace.c
+src-$(CONFIG_HIFI4_WATCHDOG) += hifi4/watchdog.c
 
 # rtos-hal
 src-y += ../lib/hifi4/hal_core.c
@@ -39,13 +40,13 @@ src-y += ../lib/hifi4/gpio.c
 src-y += ../lib/hifi4/gpadc.c
 src-y += ../lib/hifi4/timer.c
 src-y += ../lib/hifi4/hstimer.c
-src-y += ../lib/hifi4/watchdog.c
 src-y += ../lib/hifi4/i2c.c
 src-y += ../lib/hifi4/spi.c
 src-y += ../lib/hifi4/pwm.c
 src-y += ../lib/hifi4/ccu.c
 src-y += ../lib/hifi4/uart.c
 src-$(CONFIG_HIFI4_MSGBOX) += ../lib/hifi4/msgbox.c
+src-$(CONFIG_HIFI4_WATCHDOG) += ../lib/hifi4/watchdog.c
 
 # generic
 src-y += generic/timer_irq.c
