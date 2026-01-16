@@ -48,7 +48,7 @@ timer_set(uint32_t next)
 void
 timer_kick(void)
 {
-    timer_set(5);
+    timer_set(300);
 }
 
 void timer_reset(void)
@@ -69,11 +69,11 @@ timer_hw_init(void)
 {
     timer1_total_times = 0;
 
-    hstimer_init(HSTIMER_1, 0);
-    hstimer_start_periodic(HSTIMER_1, 0xffffffff, 0x00000000, HSTIMER1_IRQHandler, NULL);
+    hstimer_init(HSTIMER_1, 1);
+    hstimer_start_periodic(HSTIMER_1, 0xffffffff, 0, HSTIMER1_IRQHandler, NULL);
     timer_reset();
 
-    hstimer_init(HSTIMER_0, 0);
+    hstimer_init(HSTIMER_0, 1);
     hstimer_start_oneshot(HSTIMER_0, 200000, 0, HSTIMER0_IRQHandler, NULL);
     timer_kick();
 }

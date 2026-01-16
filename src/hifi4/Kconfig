@@ -16,7 +16,11 @@ config HIFI4_SELECT
 
 config CLOCK_FREQ
     int
-    default 200000000
+    default 100000000
+
+config HIFI4_WATCHDOG
+    bool
+    default y
 
 choice
     prompt "Communication Interface"

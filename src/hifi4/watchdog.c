@@ -8,16 +8,17 @@
 #include <hal.h> // watchdog_init
 #include "sched.h" // DECL_TASK
 #include "command.h"    // shutdown
+#include "log.h"
 
-void
-command_reset(uint32_t *args)
-{
-    // Disable all interrupts, including HSTIMER so scheduler doesn't run
-    irq_global_disable();
-    // Wait for watchdog to reset us
-    __asm__ volatile("waiti 0");
-}
-DECL_COMMAND_FLAGS(command_reset, HF_IN_SHUTDOWN, "reset");
+// void
+// command_reset(uint32_t *args)
+// {
+//     // Disable all interrupts, including HSTIMER so scheduler doesn't run
+//     irq_global_disable();
+//     // Wait for watchdog to reset us
+//     __asm__ volatile("waiti 0");
+// }
+// DECL_COMMAND_FLAGS(command_reset, HF_IN_SHUTDOWN, "reset");
 
 void
 watchdog_hw_reset(void)
@@ -35,11 +36,11 @@ DECL_TASK(watchdog_hw_reset);
 void
 watchdog_hw_init(void)
 {
-    hal_debug_print("watchdog_hw_init!!!!!!!!!!!\n");
+    lprintf("watchdog_hw_init!!!!!!!!!!!\n");
     // Uncomment for software watchdog
     // watchdog_set_handler(WDOG_IRQHandler, NULL);
     // watchdog_init(WDOG_INTV_0_5_SEC, false);
-    watchdog_init(WDOG_INTV_0_5_SEC, true);
+    watchdog_init(WDOG_INTV_1_SEC, true);
     watchdog_start();
 }
 DECL_INIT(watchdog_hw_init);
