@@ -51,25 +51,18 @@ static void wdog_irq_handler(uint32_t irq, void *arg)
  * Public Functions
  *============================================================================*/
 
-void watchdog_init(uint32_t timeout_ms, bool reset_on_timeout)
+void watchdog_init(wdog_intv_t interval, bool reset_on_timeout)
 {
     /* Stop watchdog first */
-    wdog_write_reg(WDOG_MODE, 0);
-    
-    /* Calculate interval
-     * Watchdog intervals: (n+1) * 0.5 seconds
-     * n=0: 0.5s, n=1: 1s, n=2: 1.5s, ... n=15: 8s
-     */
-    uint32_t interval_500ms = (timeout_ms + 250) / 500; /* Round to nearest 0.5s */
-    if (interval_500ms == 0) interval_500ms = 1;
-    if (interval_500ms > 16) interval_500ms = 16;
-    wdog_interval = interval_500ms - 1;
+    watchdog_stop();
+
+    wdog_interval = interval;
     
     /* Configure mode: reset or IRQ only */
     if (reset_on_timeout) {
-        wdog_write_reg(WDOG_CFG, WDOG_CFG_SYS_RESET);
+        wdog_write_reg(WDOG_CFG, WDOG_CFG_KEY | WDOG_CFG_SYS_RESET);
     } else {
-        wdog_write_reg(WDOG_CFG, WDOG_CFG_IRQ_ONLY);
+        wdog_write_reg(WDOG_CFG, WDOG_CFG_KEY | WDOG_CFG_IRQ_ONLY);
         
         /* Enable IRQ */
         wdog_write_reg(WDOG_IRQ_EN, BIT(0));
@@ -83,7 +76,7 @@ void watchdog_init(uint32_t timeout_ms, bool reset_on_timeout)
 
 void watchdog_start(void)
 {
-    uint32_t mode = WDOG_MODE_EN | WDOG_MODE_INTV(wdog_interval);
+    uint32_t mode = WDOG_MODE_KEY | WDOG_MODE_EN | WDOG_MODE_INTV(wdog_interval);
     wdog_write_reg(WDOG_MODE, mode);
     
     /* Initial kick to start countdown */
@@ -92,7 +85,7 @@ void watchdog_start(void)
 
 void watchdog_stop(void)
 {
-    wdog_write_reg(WDOG_MODE, 0);
+    wdog_write_reg(WDOG_MODE, WDOG_MODE_KEY);
 }
 
 void watchdog_kick(void)
