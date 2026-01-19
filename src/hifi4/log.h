@@ -6,7 +6,6 @@
 void log_init(void);
 void log_fake_init(void);
 void log_clear(void);
-void lprintf(const char *str);
-void lprint_hex(uint32_t value);
+int lprintf(const char *fmt, ...);
 
 #endif // log.h
