@@ -28,12 +28,12 @@ src-y += hifi4/main.c
 src-y += hifi4/util.c
 src-y += hifi4/gpio.c
 src-y += hifi4/irq.c
-src-y += hifi4/timer.c
 src-$(CONFIG_SERIAL) += hifi4/serial.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/msgbox.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/com.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/sharespace.c
 src-$(CONFIG_HIFI4_WATCHDOG) += hifi4/watchdog.c
+src-y += hifi4/timer.c
 
 # rtos-hal
 src-y += ../lib/hifi4/hal_core.c
