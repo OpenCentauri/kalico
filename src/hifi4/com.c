@@ -11,7 +11,6 @@
 #include "sched.h" // sched_wake_tasks
 #include "com.h" // msgbox_enable_tx_irq
 #include "sharespace.h" // sharespace_read
-#include "log.h" // lprintf
 
 #define RX_BUFFER_SIZE 192
 #define TX_BUFFER_SIZE 128
@@ -83,9 +82,6 @@ sharespace_send_task(void)
     if (!tpos)
         return;
     int_fast8_t ret = sharespace_write(transmit_buf, tpos);
-    // lprintf("sharespace_send_task: ");
-    // for (int i = tpos; i < tmax; i++)
-    //     lprint_hex(data[i]);
     if (ret <= 0)
         return;
     uint_fast8_t needcopy = tpos - ret;
