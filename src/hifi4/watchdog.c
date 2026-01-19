@@ -8,7 +8,6 @@
 #include <hal.h> // watchdog_init
 #include "sched.h" // DECL_TASK
 #include "command.h"    // shutdown
-#include "log.h"
 
 // void
 // command_reset(uint32_t *args)
@@ -36,7 +35,6 @@ DECL_TASK(watchdog_hw_reset);
 void
 watchdog_hw_init(void)
 {
-    lprintf("watchdog_hw_init!!!!!!!!!!!\n");
     // Uncomment for software watchdog
     // watchdog_set_handler(WDOG_IRQHandler, NULL);
     // watchdog_init(WDOG_INTV_0_5_SEC, false);
