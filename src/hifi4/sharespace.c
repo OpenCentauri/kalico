@@ -151,11 +151,11 @@ void sharespace_init(void) {
     arm_head_ptr = (volatile MsgHead*)(dsp_reads_from_arm + SHARE_SPACE_HEAD_OFFSET);
     dsp_head_ptr = (volatile MsgHead*)(dsp_writes_to_arm + SHARE_SPACE_HEAD_OFFSET);
 
-    // hal_debug_print("sharespace_init: Pointers updated to kbuf regions.\n");
-    // hal_debug_variable("sharespace_init: dsp_reads_from_arm (ARM->DSP buffer) is now at ", (uint32_t)dsp_reads_from_arm);
-    // hal_debug_variable("sharespace_init: dsp_writes_to_arm  (DSP->ARM buffer) is now at ", (uint32_t)dsp_writes_to_arm);
-    // hal_debug_variable("sharespace_init: arm_head_ptr is now at ", (uint32_t)arm_head_ptr);
-    // hal_debug_variable("sharespace_init: dsp_head_ptr is now at ", (uint32_t)dsp_head_ptr);
+    hal_debug_print("sharespace_init: Pointers updated to kbuf regions.\n");
+    hal_debug_variable("sharespace_init: dsp_reads_from_arm (ARM->DSP buffer) is now at ", (uint32_t)dsp_reads_from_arm);
+    hal_debug_variable("sharespace_init: dsp_writes_to_arm  (DSP->ARM buffer) is now at ", (uint32_t)dsp_writes_to_arm);
+    hal_debug_variable("sharespace_init: arm_head_ptr is now at ", (uint32_t)arm_head_ptr);
+    hal_debug_variable("sharespace_init: dsp_head_ptr is now at ", (uint32_t)dsp_head_ptr);
 
     MsgHead dsp_head = {
         .read_addr = MIN_ADDR,
@@ -175,7 +175,7 @@ void sharespace_init(void) {
     msgbox_send_signal((dsp_head.write_addr<<16) + dsp_head.read_addr);
 
     MsgHead arm_head;
-    // hal_debug_print("sharespace_init: Waiting for ARM to acknowledge with init_state=1.\n");
+    hal_debug_print("sharespace_init: Waiting for ARM to acknowledge with init_state=1.\n");
     while (1) {
         dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
         memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
@@ -186,7 +186,7 @@ void sharespace_init(void) {
             break;
         }
     }
-    // hal_debug_print("sharespace_init: Initialization complete.\n");
+    hal_debug_print("sharespace_init: Initialization complete.\n");
 }
 DECL_INIT(sharespace_init);
 
@@ -270,9 +270,8 @@ int sharespace_write(const void* data, int len) {
 int sharespace_read(void* out_buffer, int max_len) {
     MsgHead dsp_head, arm_head;
     
-    // Invalidate ARM head and data cache to read fresh data from ARM
+    // Invalidate ARM head to read fresh data from ARM
     dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
-    dcache_region_invalidate((void*)(dsp_reads_from_arm + MIN_ADDR), MAX_ADDR - MIN_ADDR);
     
     memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
     memcpy(&dsp_head, (const void*)dsp_head_ptr, sizeof(MsgHead));
@@ -284,7 +283,7 @@ int sharespace_read(void* out_buffer, int max_len) {
     // hal_debug_variable("sharespace_read: local_read_addr = ", local_read_addr);
 
     if (local_read_addr == host_write_addr) {
-        lprintf("sharespace_read: no data available\n");
+        // lprintf("sharespace_read: no data available\n");
         return 0;
     }
 
@@ -297,6 +296,9 @@ int sharespace_read(void* out_buffer, int max_len) {
 
     // hal_debug_variable("sharespace_read: msg_size = ", msg_size);
     // hal_debug_variable("    max_len = ", max_len);
+
+    // Invalidate data cache to read fresh data from ARM
+    dcache_region_invalidate((void*)(dsp_reads_from_arm + MIN_ADDR), MAX_ADDR - MIN_ADDR);
 
     int bytes_to_copy = (msg_size < max_len) ? msg_size : max_len;
     uint8_t* dest = (uint8_t*)out_buffer;
