@@ -460,8 +460,9 @@ void hal_init(void)
     REG32(DSP_INTC_BASE + DSP_INTC_PEND0) = 0xFFFFFFFF;
     REG32(DSP_INTC_BASE + DSP_INTC_PEND1) = 0xFFFFFFFF;
     REG32(DSP_INTC_BASE + DSP_INTC_PEND2) = 0xFFFFFFFF;
-    
+
     cache_enable_ddr();
+    watchdog_stop();
 
     /* Enable global interrupts */
     irq_global_enable();
