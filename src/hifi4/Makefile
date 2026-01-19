@@ -22,13 +22,13 @@ ASFLAGS += -Wa,--abi-call0
 ASFLAGS += -Ilib/hifi4
 
 # Add source files
+src-y += hifi4/log.c 
 src-y += hifi4/alloc.c
 src-y += hifi4/main.c
 src-y += hifi4/util.c
 src-y += hifi4/gpio.c
 src-y += hifi4/irq.c
 src-y += hifi4/timer.c
-src-y += hifi4/log.c
 src-$(CONFIG_SERIAL) += hifi4/serial.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/msgbox.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/com.c
@@ -37,6 +37,7 @@ src-$(CONFIG_HIFI4_WATCHDOG) += hifi4/watchdog.c
 
 # rtos-hal
 src-y += ../lib/hifi4/hal_core.c
+src-y += ../lib/hifi4/cache.c
 src-y += ../lib/hifi4/gpio.c
 src-y += ../lib/hifi4/gpadc.c
 src-y += ../lib/hifi4/timer.c
