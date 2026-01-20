@@ -16,6 +16,8 @@ DECL_ENUMERATION_RANGE("pin", "PE0", 4*32, 18);
 DECL_ENUMERATION_RANGE("pin", "PF0", 5*32, 7);
 DECL_ENUMERATION_RANGE("pin", "PG0", 6*32, 19);
 
+DECL_CONSTANT("ADC_MAX", 4095); // 12bit adc
+
 struct gpio_out gpio_out_setup(uint8_t pin, uint8_t val) {
     gpio_init();
     uint8_t port = pin / 32;
