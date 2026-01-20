@@ -48,6 +48,8 @@
 #define UART1_BASE          0x02500400UL
 #define UART2_BASE          0x02500800UL
 #define UART3_BASE          0x02500C00UL
+#define UART4_BASE          0x02501000UL
+#define UART5_BASE          0x02501400UL
 
 /* General Purpose ADC */
 #define GPADC_BASE          0x02009000UL
@@ -107,10 +109,14 @@
 #define CCU_UART1_GATING    BIT(1)
 #define CCU_UART2_GATING    BIT(2)
 #define CCU_UART3_GATING    BIT(3)
+#define CCU_UART4_GATING    BIT(4)
+#define CCU_UART5_GATING    BIT(5)
 #define CCU_UART0_RST       BIT(16)
 #define CCU_UART1_RST       BIT(17)
 #define CCU_UART2_RST       BIT(18)
 #define CCU_UART3_RST       BIT(19)
+#define CCU_UART4_RST       BIT(20)
+#define CCU_UART5_RST       BIT(21)
 
 /* TWI/I2C BGR bits */
 #define CCU_TWI0_GATING     BIT(0)
@@ -308,6 +314,8 @@ typedef enum {
     UART_1 = 1,
     UART_2 = 2,
     UART_3 = 3,
+    UART_4 = 4,
+    UART_5 = 5,
 } uart_id_t;
 
 typedef enum {

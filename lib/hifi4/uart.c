@@ -15,11 +15,13 @@
  *============================================================================*/
 
 /* UART base addresses */
-static const uint32_t uart_bases[4] = {
+static const uint32_t uart_bases[6] = {
     UART0_BASE,
     UART1_BASE,
     UART2_BASE,
     UART3_BASE,
+    UART4_BASE,
+    UART5_BASE,
 };
 
 /* UART interrupt handlers */
@@ -191,18 +193,36 @@ static void uart3_irq_handler(uint32_t irq, void *arg)
     uart_irq_handler_internal(UART_3);
 }
 
-static const irq_handler_t uart_irq_handlers[4] = {
+static void uart4_irq_handler(uint32_t irq, void *arg)
+{
+    (void)irq;
+    (void)arg;
+    uart_irq_handler_internal(UART_4);
+}
+
+static void uart5_irq_handler(uint32_t irq, void *arg)
+{
+    (void)irq;
+    (void)arg;
+    uart_irq_handler_internal(UART_5);
+}
+
+static const irq_handler_t uart_irq_handlers[6] = {
     uart0_irq_handler,
     uart1_irq_handler,
     uart2_irq_handler,
     uart3_irq_handler,
+    uart4_irq_handler,
+    uart5_irq_handler,
 };
 
-static const uint32_t uart_irq_nums[4] = {
+static const uint32_t uart_irq_nums[6] = {
     INTC_UART0,
     INTC_UART1,
     INTC_UART2,
     INTC_UART3,
+    INTC_UART4,
+    INTC_UART5,
 };
 
 void uart_set_rx_callback(uart_id_t uart_id, irq_handler_t callback, void *arg)
@@ -256,7 +276,7 @@ int uart_init(uart_id_t uart_id, const uart_config_t *config, uint32_t clk_freq)
     uint32_t lcr = 0;
     
     /* Validate parameters */
-    if (uart_id > UART_3 || config == NULL) {
+    if (uart_id > UART_5 || config == NULL) {
         return -1;
     }
     
@@ -277,7 +297,7 @@ int uart_init(uart_id_t uart_id, const uart_config_t *config, uint32_t clk_freq)
     uart_handlers[uart_id].arg = NULL;
     
     /* Calculate divisor: divisor = clk_freq / (16 * baudrate) */
-    divisor = (clk_freq + (config->baudrate * 8)) / (config->baudrate * 16);
+    divisor = clk_freq / (config->baudrate * 16);
     if (divisor == 0 || divisor > 0xFFFF) {
         return -1;
     }
