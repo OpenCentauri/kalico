@@ -512,3 +512,34 @@ void hal_debug_variable(const char *str, uint32_t value)
     hal_debug_hex(value);
     uart_puts(UART_0, "\n");
 }
+
+void hal_restart(void)
+{
+    /* Disable all interrupts */
+    irq_global_disable();
+    
+    /* Clear INTENABLE to prevent any interrupt from firing */
+    __asm__ volatile("wsr.intenable %0" :: "a"(0));
+    
+    /* Flush data cache to ensure memory is consistent */
+    dcache_writeback_all();
+    
+    /* Invalidate instruction cache so we fetch fresh code */
+    icache_invalidate_all();
+    
+    /* Memory barrier */
+    __asm__ volatile("dsync");
+    __asm__ volatile("isync");
+
+    extern uint32_t _memmap_reset_vector;
+    
+    /* Jump to reset vector - this function never returns */
+    __asm__ volatile(
+        "jx %0"
+        :
+        : "a"(&_memmap_reset_vector)
+    );
+    
+    /* Should never reach here */
+    __builtin_unreachable();
+}

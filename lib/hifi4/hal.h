@@ -1864,4 +1864,6 @@ void hal_debug_hex(uint32_t value);
 void hal_debug_print(const char *str);
 void hal_debug_variable(const char *str, uint32_t value);
 
+void hal_restart(void);
+
 #endif /* R528_HIFI4_HAL_H */
