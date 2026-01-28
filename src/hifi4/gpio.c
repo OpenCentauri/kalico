@@ -16,7 +16,7 @@ DECL_ENUMERATION_RANGE("pin", "PE0", 4*32, 18);
 DECL_ENUMERATION_RANGE("pin", "PF0", 5*32, 7);
 DECL_ENUMERATION_RANGE("pin", "PG0", 6*32, 19);
 
-DECL_CONSTANT("ADC_MAX", 4095); // 12bit adc
+DECL_CONSTANT("ADC_MAX", GPADC_MAX_VALUE); // 12bit adc
 
 struct gpio_out gpio_out_setup(uint8_t pin, uint8_t val) {
     gpio_init();
@@ -62,55 +62,35 @@ struct gpio_pwm gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val) {
 void gpio_pwm_write(struct gpio_pwm g, uint8_t val) {
 }
 
-static uint32_t channel_data [4];
-static uint8_t channel_valid [4];
-static void gpadc_irq_callback_0(uint32_t irq, void *arg)
-{
-    channel_data[0] = gpadc_read_data(GPADC_CHANNEL_0);
-    channel_valid[0] = 0;
-}
-static void gpadc_irq_callback_1(uint32_t irq, void *arg)
-{
-    channel_data[1] = gpadc_read_data(GPADC_CHANNEL_1);
-    channel_valid[1] = 0;
-}
-static void gpadc_irq_callback_2(uint32_t irq, void *arg)
-{
-    channel_data[2] = gpadc_read_data(GPADC_CHANNEL_2);
-    channel_valid[2] = 0;
-}
-static void gpadc_irq_callback_3(uint32_t irq, void *arg)
-{
-    channel_data[3] = gpadc_read_data(GPADC_CHANNEL_3);
-    channel_valid[3] = 0;
-}
 struct gpio_adc gpio_adc_setup(uint8_t pin) {
     // Valid ADC pins PB13-PB15
     if (pin < (32+13) || pin > (32+13+3))
         shutdown("Not a valid ADC pin");
 
     gpadc_channel_t chan = (gpadc_channel_t)(pin - (32+13));
-    gpadc_init(1000);
+
     gpadc_channel_enable(chan);
-    if (chan == GPADC_CHANNEL_0)
-        gpadc_irq_enable(chan, gpadc_irq_callback_0, NULL);
-    else if (chan == GPADC_CHANNEL_1)
-        gpadc_irq_enable(chan, gpadc_irq_callback_1, NULL);
-    else if (chan == GPADC_CHANNEL_2)
-        gpadc_irq_enable(chan, gpadc_irq_callback_2, NULL);
-    else
-        gpadc_irq_enable(chan, gpadc_irq_callback_3, NULL);
+    gpadc_start_continuous(chan);
+
     return (struct gpio_adc){ .chan=chan };
 }
+void adc_init(void)
+{
+    gpadc_init(1000);
+}
+DECL_INIT(adc_init);
 uint32_t gpio_adc_sample(struct gpio_adc g) {
-    return channel_valid[g.chan];
+    if (gpadc_has_data(g.chan))
+        return 0;
+    return timer_from_us(20);
 }
 uint16_t gpio_adc_read(struct gpio_adc g) {
-    channel_valid[g.chan] = timer_from_us(20);
-    return channel_data[g.chan];
+    uint16_t data = gpadc_read_data(g.chan);
+    gpadc_clear_status(g.chan);
+    return data;
 }
 void gpio_adc_cancel_sample(struct gpio_adc g) {
-    gpadc_channel_disable(g.chan);
+    // gpadc_channel_disable(g.chan);
 }
 
 struct spi_config
