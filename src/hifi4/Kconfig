@@ -39,6 +39,12 @@ choice
     config HIFI4_SERIAL_UART3
         bool "UART3"
         select SERIAL
+    config HIFI4_SERIAL_UART4
+        bool "UART4"
+        select SERIAL
+    config HIFI4_SERIAL_UART5
+        bool "UART5"
+        select SERIAL
 endchoice
 
 endif
