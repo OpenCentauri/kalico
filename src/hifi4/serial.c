@@ -17,7 +17,11 @@
 #elif CONFIG_HIFI4_SERIAL_UART2
     #define UARTx UART_2
 #elif CONFIG_HIFI4_SERIAL_UART3
-    #define UARTx UART_0
+    #define UARTx UART_3
+#elif CONFIG_HIFI4_SERIAL_UART4
+    #define UARTx UART_4
+#elif CONFIG_HIFI4_SERIAL_UART5
+    #define UARTx UART_5
 #endif
 
 void
