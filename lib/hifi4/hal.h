@@ -353,31 +353,31 @@ typedef struct {
 #define GPADC_CH0_DATA      0x80    /* Channel 0 Data Register */
 
 /* GPADC_SR_CON bits */
-#define GPADC_SR_CON_FS_DIV_MASK    GENMASK(15, 0)
-#define GPADC_SR_CON_TACQ_MASK      GENMASK(31, 16)
+#define GPADC_SR_CON_TACQ_MASK      GENMASK(15, 0)
+#define GPADC_SR_CON_FS_DIV_MASK    GENMASK(31, 16)
 
 /* GPADC_CTRL bits */
-#define GPADC_CTRL_ADC_EN           BIT(0)
-#define GPADC_CTRL_ADC_AUTOCALI_EN  BIT(1)
-#define GPADC_CTRL_WORK_MODE_MASK   GENMASK(5, 4)
-#define GPADC_CTRL_WORK_MODE_SINGLE (0 << 4)
-#define GPADC_CTRL_WORK_MODE_CONT   (2 << 4)
-#define GPADC_CTRL_WORK_MODE_BURST  (3 << 4)
+#define GPADC_CTRL_ADC_EN           BIT(16)
 #define GPADC_CTRL_ADC_CALI_EN      BIT(17)
+#define GPADC_CTRL_WORK_MODE_MASK   GENMASK(19, 18)
+#define GPADC_CTRL_WORK_MODE_SINGLE (0 << 18)
+#define GPADC_CTRL_WORK_MODE_CONT   (2 << 18)
+#define GPADC_CTRL_WORK_MODE_BURST  (3 << 18)
+#define GPADC_CTRL_ADC_AUTOCALI_EN  BIT(23)
 
 /* GPADC_CS_EN bits */
 #define GPADC_CS_EN_CH(n)           BIT(n)
 #define GPADC_CS_EN_CMP(n)          BIT((n) + 16)
 
 /* GPADC_FIFO_INTC bits */
-#define GPADC_FIFO_INTC_DATA_DRQ_EN BIT(16)
+#define GPADC_FIFO_INTC_FLUSH       BIT(4)
+#define GPADC_FIFO_INTC_DATA_IRQ_EN BIT(16)
 #define GPADC_FIFO_INTC_OVERRUN_EN  BIT(17)
-#define GPADC_FIFO_INTC_DATA_IRQ_EN BIT(18)
-#define GPADC_FIFO_INTC_FLUSH       BIT(21)
+#define GPADC_FIFO_INTC_DATA_DRQ_EN BIT(18)
 
 /* GPADC_FIFO_INTS bits */
+#define GPADC_FIFO_INTS_DATA        BIT(16)
 #define GPADC_FIFO_INTS_OVERRUN     BIT(17)
-#define GPADC_FIFO_INTS_DATA        BIT(18)
 
 /* GPADC_DATA_INTC bits */
 #define GPADC_DATA_INTC_CH(n)       BIT(n)
@@ -904,6 +904,19 @@ void gpadc_irq_disable(gpadc_channel_t channel);
  * @return 12-bit ADC value
  */
 uint16_t gpadc_read_data(gpadc_channel_t channel);
+
+/**
+ * @brief Check if ADC has new data
+ * @param channel Channel to read
+ * @return True if new data avaliable to be read
+ */
+bool gpadc_has_data(gpadc_channel_t channel);
+
+/**
+ * @brief Clear INTS channel to request new data
+ * @param channel Channel to read
+ */
+void gpadc_clear_status(gpadc_channel_t channel);
 
 /*============================================================================
  * Timer Definitions (32-bit down counter)

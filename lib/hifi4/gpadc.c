@@ -213,6 +213,10 @@ void gpadc_start_continuous(gpadc_channel_t channel)
     ctrl |= GPADC_CTRL_ADC_EN;
     gpadc_write_reg(GPADC_CTRL, ctrl);
     
+    uint32_t intc = gpadc_read_reg(GPADC_DATA_INTC);
+    intc |= GPADC_DATA_INTC_CH(channel);
+    gpadc_write_reg(GPADC_DATA_INTC, intc);
+
     current_mode = GPADC_MODE_CONTINUOUS;
 }
 
@@ -233,6 +237,17 @@ uint16_t gpadc_read_data(gpadc_channel_t channel)
     
     uint32_t data = gpadc_read_reg(GPADC_CH0_DATA + channel * 4);
     return (uint16_t)(data & GPADC_MAX_VALUE);
+}
+
+bool gpadc_has_data(gpadc_channel_t channel)
+{
+    uint32_t status = gpadc_read_reg(GPADC_DATA_INTS);
+    return status & GPADC_DATA_INTS_CH(channel);
+}
+
+void gpadc_clear_status(gpadc_channel_t channel)
+{
+    gpadc_write_reg(GPADC_DATA_INTS, GPADC_DATA_INTS_CH(channel));
 }
 
 /*============================================================================
