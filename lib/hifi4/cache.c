@@ -284,15 +284,13 @@ void cache_init(void)
  */
 void cache_enable_ddr(void)
 {
-    /* Flush and invalidate first */
-    dcache_writeback_invalidate_all();
-    icache_invalidate_all();
+    cache_init();
     
-    /* Set region 1 (0x20000000-0x3FFFFFFF) to write-back */
+    /* Region 1 (0x20000000): Write-back - DSP private DDR */
     cache_set_region_attr(0x20000000, CA_WRITEBACK);
-    
-    __asm__ volatile("dsync");
     __asm__ volatile("isync");
+    __asm__ volatile("nop");
+    __asm__ volatile("nop");
 }
 
 /*============================================================================
