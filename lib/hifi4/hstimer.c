@@ -213,6 +213,24 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
     hstimer_write_reg(ctrl_off, ctrl);
 }
 
+// Fast path for timer_set() - assumes handler already registered
+void hstimer_reschedule_oneshot(hstimer_id_t hstimer_id,
+                                uint32_t ticks_lo, uint32_t ticks_hi)
+{
+    uint32_t ctrl_off, intv_lo_off, intv_hi_off, cur_lo_off, cur_hi_off;
+    hstimer_get_offsets(hstimer_id, &ctrl_off, &intv_lo_off, &intv_hi_off,
+                        &cur_lo_off, &cur_hi_off);
+
+    // Update interval only (skip handler registration)
+    hstimer_write_reg(intv_lo_off, ticks_lo);
+    hstimer_write_reg(intv_hi_off, ticks_hi & 0x00FFFFFF);
+
+    // Clear pending and restart
+    uint32_t ctrl = hstimer_read_reg(ctrl_off);
+    ctrl |= HSTMR_CTRL_MODE_SINGLE | HSTMR_CTRL_RELOAD | HSTMR_CTRL_EN;
+    hstimer_write_reg(ctrl_off, ctrl);
+}
+
 void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
                             uint32_t ticks_hi, irq_handler_t handler, void *arg)
 {
@@ -255,6 +273,20 @@ void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
     /* Enable the timer */
     ctrl |= HSTMR_CTRL_EN;
     hstimer_write_reg(ctrl_off, ctrl);
+}
+
+
+// Fast path for timer_set() - assumes handler already registered
+void hstimer_reschedule_periodic(hstimer_id_t hstimer_id,
+                                uint32_t ticks_lo, uint32_t ticks_hi)
+{
+    uint32_t ctrl_off, intv_lo_off, intv_hi_off, cur_lo_off, cur_hi_off;
+    hstimer_get_offsets(hstimer_id, &ctrl_off, &intv_lo_off, &intv_hi_off,
+                        &cur_lo_off, &cur_hi_off);
+
+    // Update interval only (skip handler registration)
+    hstimer_write_reg(intv_lo_off, ticks_lo);
+    hstimer_write_reg(intv_hi_off, ticks_hi & 0x00FFFFFF);
 }
 
 void hstimer_stop(hstimer_id_t hstimer_id)

@@ -228,3 +228,15 @@ void ccu_hstimer_disable(void)
 {
     ccu_clear_bits(CCU_HSTIMER_BGR, CCU_HSTIMER_GATING | CCU_HSTIMER_RST);
 }
+
+/*============================================================================
+ * DSP Clock Control
+ *============================================================================*/
+
+void ccu_dsp_set_clk_divisor(uint8_t factor_m)
+{
+    uint32_t val = ccu_read_reg(CCU_DSP_CLK);
+    val &= ~CCU_DSP_CLK_FACTOR_M_MASK;
+    val |= CCU_DSP_CLK_FACTOR_M(factor_m);
+    ccu_write_reg(CCU_DSP_CLK, val);
+}

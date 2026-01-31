@@ -16,7 +16,7 @@ config HIFI4_SELECT
 
 config CLOCK_FREQ
     int
-    default 200000000
+    default 400000000 # 400Mhz is max Klipper currently supports
 
 config HIFI4_WATCHDOG
     bool

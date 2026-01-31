@@ -12,21 +12,12 @@
 #include "sched.h" // DECL_INIT
 #include "board/irq.h" // irq_disable
 
-static uint32_t timer1_total_times;
-
-/****************************************************************
- * Low level timer code
- ****************************************************************/
-
-// Hardware timer IRQ handler - dispatch software timers
 void __visible __aligned(16)
-HSTIMER0_IRQHandler(uint32_t irq, void *arg)
+CCOMPARE0_IRQHandler(uint32_t irq, void *arg)
 {
     irq_disable();
     uint32_t next = timer_dispatch_many();
-    uint32_t now = timer_read_time();
-    int32_t diff = next - now;
-    timer_set(diff);
+    timer_set(next);
     irq_enable();
 }
 
@@ -34,24 +25,22 @@ HSTIMER0_IRQHandler(uint32_t irq, void *arg)
 uint32_t
 timer_read_time(void)
 {
-    // timer is a count down timer so we have to invert the value
-    uint32_t hi, lo;
-    hstimer_get_counter(HSTIMER_1, &lo, &hi);
-    lo = 0xffffffff - lo;
-    return lo;
+    uint32_t val;
+    __asm__ volatile("rsr.ccount %0" : "=a"(val));
+    return val;
 }
 
 inline void
 timer_set(uint32_t next)
 {
-    hstimer_start_oneshot(HSTIMER_0, next, 0, HSTIMER0_IRQHandler, NULL);
+    __asm__ volatile("wsr.ccompare0 %0; rsync" :: "a"(next));
 }
 
 // Activate timer dispatch as soon as possible
 void
 timer_kick(void)
 {
-    timer_set(1);
+    timer_set(timer_read_time() + 500);
 }
 
 // Dummy timer to avoid scheduling a SysTick irq greater than 0xffffff
@@ -78,22 +67,14 @@ DECL_SHUTDOWN(timer_reset);
 /****************************************************************
  * Setup and irqs
  ****************************************************************/
-static void HSTIMER1_IRQHandler(uint32_t irq, void *arg)
-{
-    timer1_total_times += 1;
-}
 
 void
 timer_hw_init(void)
 {
-    timer1_total_times = 0;
-
-    hstimer_init(HSTIMER_1, 0);
-    hstimer_start_periodic(HSTIMER_1, 0xffffffff, 0, HSTIMER1_IRQHandler, NULL);
+    __asm__ volatile("wsr.ccount %0; rsync" :: "a"(0)); // Reset CCOUNT to 0
+    irq_register(IRQ_COMPARE0, CCOMPARE0_IRQHandler, NULL);
     timer_reset();
-
-    hstimer_init(HSTIMER_0, 0);
-    hstimer_start_oneshot(HSTIMER_0, 200000, 0, HSTIMER0_IRQHandler, NULL);
     timer_kick();
+    irq_enable_interrupt(IRQ_COMPARE0);
 }
 DECL_INIT(timer_hw_init);
