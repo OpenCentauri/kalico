@@ -13,7 +13,7 @@
 #include "sharespace.h" // sharespace_read
 
 #define RX_BUFFER_SIZE 192
-#define TX_BUFFER_SIZE 128
+#define TX_BUFFER_SIZE 192
 
 static uint8_t receive_buf[RX_BUFFER_SIZE], receive_pos;
 static uint8_t transmit_buf[TX_BUFFER_SIZE], transmit_pos;
