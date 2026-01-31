@@ -35,6 +35,7 @@
 #define CLK_FREQ_LOSC 32768
 #define CLK_FREQ_HOSC 24000000
 #define CLK_FREQ_AHB0 200000000
+#define CLK_FREQ_CPU  600000000
 
 /*============================================================================
  * Base Addresses (R528/T113)
@@ -99,6 +100,7 @@
 #define CCU_TIMER_BGR       0x0850      /* Timer Bus Gating Reset (found in some docs) */
 #define CCU_MSGBOX_BGR      0x071C      /* MSGBOX Bus Gating Reset */
 #define CCU_HSTIMER_BGR     0x073C      /* HSTIMER Bus Gating Reset */
+#define CCU_DSP_CLK         0x0C70      /* DSP Clock */
 
 /* For peripherals, bit 0 is usually gating, bit 16 is usually reset */
 #define CCU_BGR_GATING(n)   BIT(n)      /* Clock gating enable */
@@ -157,6 +159,10 @@
 /* HSTIMER BGR bits */
 #define CCU_HSTIMER_GATING  BIT(0)
 #define CCU_HSTIMER_RST     BIT(16)
+
+/* HSTIMER BGR bits */
+#define CCU_DSP_CLK_FACTOR_M_MASK   0x1F
+#define CCU_DSP_CLK_FACTOR_M(m)     ((m) << 0)  /* Factor M (0-4: /(M+1)) */
 
 /*============================================================================
  * GPIO Definitions
@@ -425,6 +431,8 @@ typedef enum {
  */
 
 /* Direct DSP Core interrupts (directly wired to core) */
+#define IRQ_COMPARE1        1       /* CCOUNT timer 1 */
+#define IRQ_COMPARE0        2       /* CCOUNT timer 0 */
 #define IRQ_MSGBOX          3       /* Msgbox 0 */
 #define IRQ_DSP_WDOG        16      /* DSP Watchdog */
 #define IRQ_DSP_TZMA        17      /* DSP TZMA */
@@ -655,6 +663,12 @@ void ccu_hstimer_enable(void);
  * @brief Disable clock for HSTIMER
  */
 void ccu_hstimer_disable(void);
+
+/**
+ * @brief Set DSP clock divisor
+ * @param factor_m Clock divider (M = FACTOR_M + 1)
+ */
+void ccu_dsp_set_clk_divisor(uint8_t factor_m);
 
 /*============================================================================
  * Function Prototypes - GPIO
@@ -991,6 +1005,15 @@ typedef enum {
 } hstimer_id_t;
 
 /*============================================================================
+ * CCOUNT and CCOMPARE Definitions
+ *============================================================================*/
+
+typedef enum {
+    XTIMER_0 = 0,
+    XTIMER_1 = 1,
+} xtimer_id_t;
+
+/*============================================================================
  * Watchdog Definitions
  *============================================================================*/
 
@@ -1308,6 +1331,14 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
                            uint32_t ticks_hi, irq_handler_t handler, void *arg);
 
 /**
+ * @brief Restart high-speed timer in oneshot mode
+ * @param hstimer_id HSTimer identifier
+ * @param interval_us Interval in microseconds
+ */
+void hstimer_reschedule_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                           uint32_t ticks_hi);
+
+/**
  * @brief Start high-speed timer in periodic mode
  * @param hstimer_id HSTimer identifier
  * @param interval_us Interval in microseconds
@@ -1316,6 +1347,14 @@ void hstimer_start_oneshot(hstimer_id_t hstimer_id, uint32_t ticks_lo,
  */
 void hstimer_start_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
                             uint32_t ticks_hi, irq_handler_t handler, void *arg);
+
+/**
+ * @brief Restart high-speed timer in periodic mode
+ * @param hstimer_id HSTimer identifier
+ * @param interval_us Interval in microseconds
+ */
+void hstimer_reschedule_periodic(hstimer_id_t hstimer_id, uint32_t ticks_lo,
+                           uint32_t ticks_hi);
 
 /**
  * @brief Stop high-speed timer
