@@ -1,0 +1,77 @@
+name: HiFi4 Firmware Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hifi4
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - name: bed
+            config: configs/hifi4-build/config.bed
+            output: bed.elf
+            toolchain: arm-none-eabi
+          - name: mainboard
+            config: configs/hifi4-build/config.mainboard
+            output: dsp.elf
+            toolchain: xtensa-hifi4
+          - name: toolhead
+            config: configs/hifi4-build/config.toolhead
+            output: toolhead.elf
+            toolchain: arm-none-eabi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        if: matrix.toolchain == 'arm-none-eabi'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Install Xtensa HiFi4 toolchain
+        if: matrix.toolchain == 'xtensa-hifi4'
+        run: |
+          curl -L -o toolchain.tar.xz https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.17.4/toolchain_linux-x86_64_xtensa-nxp_rt700_hifi4_zephyr-elf.tar.xz
+          mkdir -p $HOME/xtensa-toolchain
+          tar -xf toolchain.tar.xz -C $HOME/xtensa-toolchain
+          echo "$HOME/xtensa-toolchain/xtensa-nxp_rt700_hifi4_zephyr-elf/bin" >> $GITHUB_PATH
+
+      - name: Build ${{ matrix.name }}
+        run: |
+          cp ${{ matrix.config }} .config
+          make olddefconfig
+          make
+
+      - name: Rename output
+        run: |
+          cp out/klipper.elf out/${{ matrix.output }}
+
+      - name: Upload ${{ matrix.name }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-firmware
+          path: out/${{ matrix.output }}
+          retention-days: 30
+
+  collect-artifacts:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: firmware
+
+      - name: Combine artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hifi4-firmware-all
+          path: firmware/
+          retention-days: 30
