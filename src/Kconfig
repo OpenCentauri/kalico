@@ -177,6 +177,10 @@ config WANT_HX71X
     bool
     depends on HAVE_GPIO
     default y
+config WANT_HX711S
+    bool
+    depends on HAVE_GPIO
+    default y
 config WANT_ADS1220
     bool
     depends on WANT_SPI
@@ -274,6 +278,9 @@ config WANT_THERMOCOUPLE
     depends on WANT_SPI
 config WANT_HX71X
     bool "Support HX711 and HX717 ADC chips"
+    depends on HAVE_GPIO
+config WANT_HX711S
+    bool "Support HX711S strain gauge probe sensors"
     depends on HAVE_GPIO
 config WANT_ADS1220
     bool "Support ADS 1220 ADC chip"
