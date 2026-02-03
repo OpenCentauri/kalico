@@ -531,14 +531,12 @@ void hal_restart(void)
     __asm__ volatile("dsync");
     __asm__ volatile("isync");
 
-    extern uint32_t _memmap_reset_vector;
+    extern void _start(void);
+
+    hal_debug_variable("Jumping to: ", (uint32_t)_start);
     
     /* Jump to reset vector - this function never returns */
-    __asm__ volatile(
-        "jx %0"
-        :
-        : "a"(&_memmap_reset_vector)
-    );
+    __asm__ volatile("jx %0" : : "a"(_start));
     
     /* Should never reach here */
     __builtin_unreachable();
