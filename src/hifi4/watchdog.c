@@ -12,6 +12,7 @@
 void
 command_reset(uint32_t *args)
 {
+    hal_debug_print("RESTART!!");
     hal_restart();
 }
 DECL_COMMAND_FLAGS(command_reset, HF_IN_SHUTDOWN, "reset");

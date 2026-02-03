@@ -10,23 +10,6 @@ static volatile uint8_t* log_buffer = NULL;
 static uint32_t log_buffer_size = 0;
 static volatile uint32_t* log_write_ptr = NULL;
 
-// void log_fake_init(void) {
-//     volatile struct spare_rtos_head_t *pstr = platform_head;
-//     volatile struct dts_msg_t *pdts = &pstr->rtos_img_hdr.dts_msg;
-//     if (pdts->dts_sharespace.status == DTS_OPEN) {
-//         log_buffer = (volatile uint8_t*)pdts->dts_sharespace.dsp_log_addr;
-//         log_buffer_size = pdts->dts_sharespace.dsp_log_size;
-//     }
-//     printf("DSP Log Sharespace Configuration:\n");
-//     printf("  DSP Log Address:   0x%x\n", (unsigned int)log_buffer);
-//     printf("  DSP Log Size:      0x%x\n", log_buffer_size);
-//     /*if (log_buffer && log_buffer_size > 4) {
-//         log_write_ptr = (volatile uint32_t*)log_buffer;
-//         log_clear();
-//     }*/
-//     printf("DONE DSP LOG FAKEINIT!\n");
-// }
-
 void log_init(void) {
     hal_debug_print("Starting DSP Log\n");
     volatile struct spare_rtos_head_t *pstr = platform_head;
@@ -48,6 +31,9 @@ void log_init(void) {
         log_write_ptr = (volatile uint32_t*)log_buffer;
         log_clear();
     }
+    lprintf("DSP Log Sharespace Configuration:\n");
+    lprintf("  DSP Log Address:   0x%x\n", (unsigned int)log_buffer);
+    lprintf("  DSP Log Size:      0x%x\n", log_buffer_size);
     lprintf("DSP logging kbuf initialized!\n");
 }
 DECL_INIT(log_init);
@@ -60,6 +46,9 @@ void log_clear(void) {
 }
 
 int lprintf(const char *fmt, ...) {
+    if (!log_write_ptr)
+        return 0;
+
     typedef __builtin_va_list va_list;
 
     va_list args;

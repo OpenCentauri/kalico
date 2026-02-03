@@ -124,7 +124,7 @@ void sharespace_init(void) {
     arm_head_ptr = (volatile MsgHead*)(dts_sharespace.arm_write_addr + SHARE_SPACE_HEAD_OFFSET);
     // hal_debug_variable("sharespace_init: arm_head_ptr initially set to ", (uint32_t)arm_head_ptr);
 
-    sharespace_clear();
+    // sharespace_clear();
     // hal_debug_print("sharespace_init: Got config from DTS.\n");
     // hal_debug_variable("sharespace_init: dsp_write_addr = ", dts_sharespace.dsp_write_addr);
     // hal_debug_variable("sharespace_init: arm_write_addr = ", dts_sharespace.arm_write_addr);

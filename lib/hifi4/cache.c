@@ -284,6 +284,14 @@ void cache_init(void)
  */
 void cache_enable_ddr(void)
 {
+    // Check if we have alreay init
+    // We don't want to invalidate the cache if we are already running cached!
+    if ((read_dtlb(0x20000000) & 0xF) == CA_WRITEBACK)
+    {
+        hal_debug_print("Skipping cache_enable_ddr!");
+        return;
+    }
+
     cache_init();
     
     /* Region 1 (0x20000000): Write-back - DSP private DDR */
