@@ -11,6 +11,5 @@ int
 main(void)
 {
     hal_init();
-    ccu_dsp_set_clk_divisor(2); // 400Mhz is max Klipper currently supports
     sched_main();
 }
