@@ -13,17 +13,20 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: bed
-            config: config/cc1-build/config.bed
-            output: bed.elf
-            toolchain: arm-none-eabi
-          - name: mainboard
-            config: config/cc1-build/config.mainboard
+          - name: dsp
+            config: config/cc1-build/config.dsp
+            source: out/klipper.elf
             output: dsp.elf
             toolchain: xtensa-hifi4
-          - name: toolhead
-            config: config/cc1-build/config.toolhead
-            output: toolhead.elf
+          - name: hotend
+            config: config/cc1-build/config.hotend
+            source: out/klipper.bin
+            output: hotend.bin
+            toolchain: arm-none-eabi
+          - name: bed
+            config: config/cc1-build/config.bed
+            source: out/klipper.bin
+            output: bed.bin
             toolchain: arm-none-eabi
 
     steps:
@@ -51,13 +54,14 @@ jobs:
 
       - name: Rename output
         run: |
-          cp out/klipper.elf out/${{ matrix.output }}
+          cp ${{ matrix.source }} ${{ matrix.output }}
 
       - name: Upload ${{ matrix.name }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}-firmware
-          path: out/${{ matrix.output }}
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
           retention-days: 30
 
   collect-artifacts:
@@ -68,10 +72,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: firmware
+          merge-multiple: true
 
-      - name: Combine artifacts
+      - name: Create combined zip
+        run: |
+          zip -j cc1-firmware-all.zip firmware/bed.bin firmware/hotend.bin firmware/dsp.elf
+
+      - name: Upload combined artifact
         uses: actions/upload-artifact@v4
         with:
           name: cc1-firmware-all
-          path: firmware/
+          path: cc1-firmware-all.zip
+          if-no-files-found: error
           retention-days: 30
