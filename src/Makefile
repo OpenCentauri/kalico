@@ -31,3 +31,7 @@ src-$(CONFIG_NEED_SENSOR_BULK) += sensor_bulk.c
 src-$(CONFIG_NEED_SOS_FILTER) += sos_filter.c
 src-$(CONFIG_NEED_LOAD_CELL_PROBE) += load_cell_probe.c
 src-$(CONFIG_WANT_HX711S) += sensor_hx711s.c
+
+ifeq ($(CONFIG_WANT_HX711S), y)
+    CFLAGS += -lm
+endif

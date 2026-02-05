@@ -23,8 +23,6 @@ struct trsync;
 #define HX711S_MAX_SENSOR_NUM   5
 // Maximum sliding window data points
 #define HX711S_MAX_DATA_NUM     30
-// Window data for averaging filter
-#define HX711S_WINDOW_DATA_NUM  28
 // Maximum sensors per device
 #define HX711S_MAX_SENSORS      4
 
@@ -38,6 +36,7 @@ struct trsync;
 // Sensor operating flags
 enum hx711s_flags {
     HX711S_FLAG_START = 1 << 0,
+    HX711S_FLAG_AWAIT_HOMING = 1 << 1,
 };
 
 // Strain gauge mode (chip and bridge type)
@@ -51,21 +50,7 @@ enum hx711s_sg_mode {
 // Probe check command modes
 enum hx711s_probe_mode {
     PROBE_CHECK_MODE_NONE        = 0,
-    PROBE_CHECK_MODE_START       = 1,
-    PROBE_CHECK_MODE_STOP        = 2,
     PROBE_CHECK_MODE_CALIBRATION = 3,
-};
-
-// Sensor status flags
-enum hx711s_status {
-    SG_1_OFFLINE = 1 << 0,
-    SG_2_OFFLINE = 1 << 1,
-    SG_3_OFFLINE = 1 << 2,
-    SG_4_OFFLINE = 1 << 3,
-    SG_1_REVERSE = 1 << 4,
-    SG_2_REVERSE = 1 << 5,
-    SG_3_REVERSE = 1 << 6,
-    SG_4_REVERSE = 1 << 7,
 };
 
 /****************************************************************
@@ -98,21 +83,14 @@ struct hx711s_sensor {
     uint32_t find_index_mode;
     uint32_t heartbeat_period;      // Heartbeat interval in samples
 
-    // Probe position
-    int32_t x;
-    int32_t y;
-    int32_t z;
-
     // Probe state
-    uint8_t is_bottom_detection;
     int32_t probe_check_cmd;
-    uint8_t is_running_check;
-    uint8_t flags;
-    uint8_t is_calibration;
-    uint8_t is_trigger;
-    uint8_t trigger_index;
-    uint8_t now_trigger;
-    uint32_t trigger_tick;
+    uint8_t flags;                  // bit 0 = START, bit 1 = AWAIT_HOMING
+    uint32_t homing_clock;          // Clock at which homing starts and triggers are awaited
+    uint8_t is_calibration;         // bit 0 = calibration mode, bit 7 = calibration complete, bi 0 = ch1, 1 = ch2, etc.
+    uint8_t is_trigger;             // Last trigger (bit coded by channel) bit 0 = ch1, 1 = ch2, etc.; bit 5 = fusion
+    uint8_t trigger_index;          // Index of the triggered point on the bed
+    uint32_t trigger_tick;          // Tick count when trigger was first detected
 
     // trsync for homing/probing integration
     struct trsync *ts;
@@ -124,15 +102,11 @@ struct hx711s_sensor {
     uint32_t hx711_count;
     uint32_t sg_mode;           // Chip/bridge mode
     uint8_t install_dir;        // Installation direction (0=negative, 1=positive)
-    uint32_t debug_data;
     int32_t times_read;
 
     // GPIO pins (for HX711 bit-bang mode)
     struct gpio_out clks[HX711S_MAX_SENSORS];
     struct gpio_in sdos[HX711S_MAX_SENSORS];
-
-    // Trace/debug flag
-    uint32_t traceflag;
 
     // Timestamps (index 4 = fusion timestamp)
     uint32_t time_stamp[5];
@@ -143,7 +117,6 @@ struct hx711s_sensor {
     int32_t sample_values[HX711S_MAX_SENSORS];       // Raw ADC values
     int32_t max_data_num;                            // Sliding window size
     int32_t calibration_values[HX711S_MAX_SENSORS];  // Calibrated values
-    int32_t filter_values[HX711S_MAX_SENSORS];       // Filtered values
     int32_t fusion_filter_value;                     // Fused sensor value
 
     // Threshold and filter parameters
@@ -151,9 +124,6 @@ struct hx711s_sensor {
     int32_t kalman_r[HX711S_MAX_SENSORS];   // Used as shake amplitude threshold
     int32_t max_th;                          // Maximum trigger threshold
     int32_t min_th;                          // Minimum trigger threshold
-    int32_t th_k;                            // Quantization step
-
-    int32_t status;                          // Sensor status flags
 };
 
 #endif // __SENSOR_HX711S_H__
