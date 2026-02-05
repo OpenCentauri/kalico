@@ -11,40 +11,45 @@ from klippy import mcu as klippy_mcu
 # Calibration status: bit 7 = success, bits 0-3 = sensor errors
 CALIBRATION_OK_BIT = 0x80
 
-# Probing parameters based on Elegoo strain_gauge.cpp implementation
-PROBE_SPEED = 2.0       # mm/s - matches Elegoo m_g29_speed
-PROBE_LIFT_SPEED = 5.0  # mm/s - faster retract
-PROBE_LIFT_HEIGHT = 1.0 # mm - lift between double-tap probes
-
 # trsync trigger reasons
 REASON_ENDSTOP_HIT = klippy_mcu.MCU_trsync.REASON_ENDSTOP_HIT
 REASON_COMMS_TIMEOUT = klippy_mcu.MCU_trsync.REASON_COMMS_TIMEOUT
 
 
 class HX711SEndstopWrapper:
-    """Endstop wrapper using trsync for proper homing integration."""
+    """Endstop wrapper implementing Kalico's mcu_probe interface for
+    trsync-based probing with HX711S strain gauge sensors."""
     def __init__(self, config, hx711s):
         self._hx711s = hx711s
         self._printer = hx711s.printer
         self._mcu = hx711s.mcu
+        self._z_offset = config.getfloat('z_offset')
         # Use TriggerDispatch for proper trsync coordination
         self._dispatch = klippy_mcu.TriggerDispatch(self._mcu)
-        # Register Z steppers
-        probe.LookupZSteppers(config, self._dispatch.add_stepper)
+        # Discover Z steppers after MCU identification
+        self._printer.register_event_handler(
+            'klippy:mcu_identify', self._handle_mcu_identify)
         # Build homing command
         self._home_cmd = None
         self._query_cmd = None
         self._mcu.register_config_callback(self._build_config)
 
+    def _handle_mcu_identify(self):
+        kin = self._printer.lookup_object('toolhead').get_kinematics()
+        for stepper in kin.get_steppers():
+            if stepper.is_active_axis('z'):
+                self.add_stepper(stepper)
+
     def _build_config(self):
-        # Lookup commands for trsync-based homing
         self._home_cmd = self._mcu.lookup_command(
-            "hx711s_home oid=%c trsync_oid=%c trigger_reason=%c error_reason=%c")
+            "hx711s_home oid=%c trsync_oid=%c clock=%u"
+            " trigger_reason=%c error_reason=%c")
         self._query_cmd = self._mcu.lookup_query_command(
             "hx711s_query_state oid=%c",
             "hx711s_state oid=%c is_triggered=%c trigger_ticks=%u",
             oid=self._hx711s.oid)
 
+    # MCU endstop interface
     def get_mcu(self):
         return self._mcu
 
@@ -56,151 +61,72 @@ class HX711SEndstopWrapper:
 
     def home_start(self, print_time, sample_time, sample_count, rest_time,
                    triggered=True):
-        # Clear Python-side trigger state before starting new probe
         self._hx711s.is_trigger = 0
-        # Convert print_time to MCU clock for synchronization
         clock = self._mcu.print_time_to_clock(print_time)
-        # Start trsync
         trigger_completion = self._dispatch.start(print_time)
-        # Tell MCU to start homing with trsync - synchronized with motion start
         self._home_cmd.send([
             self._hx711s.oid,
             self._dispatch.get_oid(),
+            clock,
             REASON_ENDSTOP_HIT,
             REASON_COMMS_TIMEOUT
         ], reqclock=clock)
         return trigger_completion
 
     def home_wait(self, home_end_time):
-        # Wait for trsync to complete
         self._dispatch.wait_end(home_end_time)
-        # Query the trigger time from MCU BEFORE stopping anything
         params = self._query_cmd.send([self._hx711s.oid])
         trigger_ticks = params['trigger_ticks']
         is_triggered = params['is_triggered']
-        logging.info("HX711S: home_wait query result: is_triggered=%s trigger_ticks=%u",
-                    is_triggered, trigger_ticks)
-        # Stop homing on MCU (must be before dispatch.stop() per MCU_endstop pattern)
-        # MCU will start reporting real-time trigger state (not latched) after this
-        self._home_cmd.send([self._hx711s.oid, 0, 0, 0])
-        # Now stop trsync dispatch
+        logging.info("HX711S: home_wait query: is_triggered=%s"
+                     " trigger_ticks=%u", is_triggered, trigger_ticks)
+        # Stop homing on MCU before dispatch.stop()
+        self._home_cmd.send([self._hx711s.oid, 0, 0, 0, 0])
         res = self._dispatch.stop()
-        logging.info("HX711S: home_wait dispatch.stop() returned reason=%d", res)
-        # Check result
+        logging.info("HX711S: home_wait dispatch reason=%d", res)
         if res >= REASON_COMMS_TIMEOUT:
             raise self._printer.command_error(
                 "HX711S: Communication timeout during homing")
         if res != REASON_ENDSTOP_HIT:
             return 0.
-        # Convert and return timestamp
         if trigger_ticks:
             trigger_time = self._mcu.clock_to_print_time(
                 self._mcu.clock32_to_clock64(trigger_ticks))
-            logging.info("HX711S: home_wait returning trigger_time=%.6f (ticks=%u)",
-                        trigger_time, trigger_ticks)
+            logging.info("HX711S: trigger_time=%.6f (ticks=%u)",
+                         trigger_time, trigger_ticks)
             return trigger_time
-        logging.warning("HX711S: home_wait got trigger but trigger_ticks=0")
+        logging.warning("HX711S: trigger but trigger_ticks=0")
         return 0.
 
     def query_endstop(self, print_time):
         return self._hx711s.is_triggered()
 
-
-class HX711SProbeSession:
-    """Probe session using homing infrastructure for continuous motion."""
-    def __init__(self, config, hx711s, param_helper, z_min):
-        self._hx711s = hx711s
-        self._printer = hx711s.printer
-        self._param_helper = param_helper
-        self._z_min = z_min
-        self._results = []
-        # Endstop wrapper now takes config for stepper registration
-        self._endstop_wrapper = HX711SEndstopWrapper(config, hx711s)
-
-    def start_probe_session(self, gcmd):
-        return self
-
-    def end_probe_session(self):
-        self._results = []
-
-    def _single_probe(self, phoming, speed):
-        """Single probe using phoming.probing_move() for continuous motion."""
+    def probing_move(self, pos, speed, gcmd):
+        """Calibrate sensors then execute a trsync-based probing move."""
         toolhead = self._printer.lookup_object('toolhead')
-        curpos = toolhead.get_position()
-
-        # Reset trigger state
-        self._hx711s.is_trigger = 0
-
-        pos = list(curpos)
-        pos[2] = self._z_min
-
-        # probing_move returns the exact trigger position calculated from
-        # stepper steps and trigger timestamp via trsync
-        epos = phoming.probing_move(self._endstop_wrapper, pos, speed)
-
-        logging.info("HX711S: Probe at z=%.6f", epos[2])
-        return epos[2]
-
-    def run_probe(self, gcmd):
-        """Double-tap probe using phoming.probing_move() for continuous motion."""
-        toolhead = self._printer.lookup_object('toolhead')
+        # Wait for pending moves (retract) to complete before calibrating
+        # so the sensor baseline isn't contaminated by bed contact
+        toolhead.wait_moves()
+        if not self._hx711s.calibration_start(30, 5.0):
+            raise self._printer.command_error(
+                "HX711S: Calibration failed before probe")
         phoming = self._printer.lookup_object('homing')
-        params = self._param_helper.get_probe_params(gcmd)
-        speed = params['probe_speed']
+        return phoming.probing_move(self, pos, speed)
 
-        # Elegoo's _probe_times pattern: retry if z1 and z2 differ too much
-        MAX_Z_ERR = 0.1  # mm - tolerance between double-tap probes
-        MAX_RETRIES = 3
+    def multi_probe_begin(self):
+        pass
 
-        for attempt in range(MAX_RETRIES):
-            # First probe
-            toolhead.wait_moves()
-            if not self._hx711s.calibration_start(30, 5.0):
-                raise self._printer.command_error("HX711S: Calibration failed")
+    def multi_probe_end(self):
+        pass
 
-            z1 = self._single_probe(phoming, speed)
+    def probe_prepare(self, hmove):
+        pass
 
-            # Lift and second probe
-            curpos = toolhead.get_position()
-            toolhead.manual_move([None, None, curpos[2] + PROBE_LIFT_HEIGHT],
-                                PROBE_LIFT_SPEED)
-            toolhead.wait_moves()
+    def probe_finish(self, hmove):
+        pass
 
-            # Small delay for sensor to stabilize after lift
-            # The trigger detection algorithm needs fresh "not touching" samples
-            self._hx711s.reactor.pause(self._hx711s.reactor.monotonic() + 0.5)
-
-            z2 = self._single_probe(phoming, speed)
-
-            # Check tolerance
-            z_diff = abs(z1 - z2)
-            if z_diff <= MAX_Z_ERR:
-                # Good result
-                z_avg = (z1 + z2) / 2.0
-                logging.info("HX711S: Probe z1=%.4f z2=%.4f diff=%.4f avg=%.4f",
-                            z1, z2, z_diff, z_avg)
-                break
-            else:
-                # Results differ too much, retry
-                logging.warning("HX711S: Probe retry %d - z1=%.4f z2=%.4f diff=%.4f > %.4f",
-                               attempt + 1, z1, z2, z_diff, MAX_Z_ERR)
-                # Lift before retry
-                curpos = toolhead.get_position()
-                toolhead.manual_move([None, None, curpos[2] + PROBE_LIFT_HEIGHT],
-                                    PROBE_LIFT_SPEED)
-        else:
-            # Max retries exceeded, use last result anyway
-            z_avg = (z1 + z2) / 2.0
-            logging.warning("HX711S: Max retries exceeded, using avg=%.4f", z_avg)
-
-        final_pos = toolhead.get_position()
-        final_pos[2] = z_avg
-        self._results.append(final_pos)
-
-    def pull_probed_results(self):
-        res = self._results
-        self._results = []
-        return res
+    def get_position_endstop(self):
+        return self._z_offset
 
 
 class HX711S:
@@ -271,36 +197,18 @@ class HX711S:
         self.mcu.register_response(self._handle_sg_resp, "sg_resp", self.oid)
         self.mcu.register_config_callback(self._build_config)
 
-        # Get z_min for probing limits
-        self._z_min = probe.lookup_minimum_z(config)
-        self._position_endstop = config.getfloat('z_offset')
+        # Create endstop wrapper implementing Kalico's mcu_probe interface
+        self._probe = HX711SEndstopWrapper(config, self)
 
-        # Create probe helpers
-        self._probe_offsets = probe.ProbeOffsetsHelper(config)
-        self._param_helper = probe.ProbeParameterHelper(config)
-        self._cmd_helper = probe.ProbeCommandHelper(
-            config, self, self._query_endstop)
+        # Register as probe via Kalico's PrinterProbe
+        self.printer.add_object(
+            'probe', probe.PrinterProbe(config, self._probe))
 
-        # Custom probe session for incremental probing
-        self._probe_session = HX711SProbeSession(
-            config, self, self._param_helper, self._z_min)
-
-        # Register as the probe object
-        self.printer.add_object('probe', self)
-
-        # Register additional GCode commands for manual testing
+        # Register sensor-specific GCode commands
         gcode = self.printer.lookup_object('gcode')
         gcode.register_command('HX_MULTI_CALIBRATE', self.cmd_HX711S_CALIBRATE,
                                desc="Calibrate HX711S strain gauge sensors")
-        gcode.register_command('HX_MULTI_STATUS', self.cmd_HX711S_STATUS,
-                               desc="Report HX711S sensor status")
-        gcode.register_command('HX_MULTI_TEST', self.cmd_HX711S_TEST,
-                               desc="Test HX711S trigger detection")
-
         logging.info("HX711S: Initialized with %d sensors", self.sensor_count)
-
-    def _query_endstop(self, print_time):
-        return self.is_triggered()
 
     def _build_config(self):
         # Pack configuration fields per MCU protocol
@@ -336,15 +244,11 @@ class HX711S:
         self._cmd_queue = self.mcu.alloc_command_queue()
         self._calibration_cmd = self.mcu.lookup_command(
             "calibration_sample oid=%c times_read=%hu", cq=self._cmd_queue)
-        # Note: query_hx711s and sg_probe_check are deprecated with trsync
-        # The hx711s_home command is looked up in HX711SEndstopWrapper
 
     def _handle_debug_hx711s(self, params):
-        arg0, arg1 = params.get('arg[0]', 0), params.get('arg[1]', 0)
-        if arg0:
-            self._calibration_ack = True
-        if arg1:
-            self._probe_cmd_ack = True
+        logging.debug("HX711S DEBUG: 0x%02x 0x%02x 0x%02x 0x%02x",
+                      params.get('arg[0]', 0), params.get('arg[1]', 0),
+                      params.get('arg[2]', 0), params.get('arg[3]', 0))
 
     def _handle_sg_resp(self, params):
         self.is_calibration = params.get('vd', 0)
@@ -378,26 +282,11 @@ class HX711S:
         logging.error("HX711S: Calibration timeout")
         return False
 
-    def wait_for_trigger(self, timeout=10.0):
-        """Wait for trigger. Returns True if triggered."""
-        endtime = self.reactor.monotonic() + timeout
-        while self.reactor.monotonic() < endtime:
-            if self.is_trigger > 0:
-                return True
-            self.reactor.pause(self.reactor.monotonic() + 0.01)
-        return False
-
-    # Note: probe_trigger_start/stop are deprecated with trsync
-    # The trsync mechanism handles trigger detection automatically
-
     def is_triggered(self):
         return self.is_trigger > 0
 
     def is_calibrated(self):
         return bool(self.is_calibration & CALIBRATION_OK_BIT)
-
-    def get_trigger_timestamp(self):
-        return self.trigger_timestamp
 
     def get_sensor_errors(self):
         """Return list of sensor indices with errors."""
@@ -405,26 +294,14 @@ class HX711S:
                 if self.is_calibration & (1 << i)]
 
     def get_status(self, eventtime):
-        status = self._cmd_helper.get_status(eventtime)
-        status.update({
+        return {
             'is_calibrated': self.is_calibrated(),
             'is_triggered': self.is_triggered(),
             'trigger_index': self.trigger_index,
             'trigger_timestamp': self.trigger_timestamp,
             'sensor_errors': self.get_sensor_errors(),
             'sensor_count': self.sensor_count,
-        })
-        return status
-
-    # Probe interface methods
-    def get_probe_params(self, gcmd=None):
-        return self._param_helper.get_probe_params(gcmd)
-
-    def get_offsets(self):
-        return self._probe_offsets.get_offsets()
-
-    def start_probe_session(self, gcmd):
-        return self._probe_session.start_probe_session(gcmd)
+        }
 
     # GCode commands
     def cmd_HX711S_CALIBRATE(self, gcmd):
@@ -439,23 +316,6 @@ class HX711S:
             gcmd.respond_info(msg)
         else:
             raise gcmd.error("HX711S: Calibration failed!")
-
-    def cmd_HX711S_STATUS(self, gcmd):
-        errors = self.get_sensor_errors()
-        gcmd.respond_info(
-            "HX711S Status:\n"
-            "  Sensors: %d\n"
-            "  Calibrated: %s (0x%02x)\n"
-            "  Triggered: %s (0x%02x)\n"
-            "  Trigger index: %d\n"
-            "  Sensor errors: %s\n"
-            "  Trigger timestamp: %.6f"
-            % (self.sensor_count,
-               "YES" if self.is_calibrated() else "NO", self.is_calibration,
-               "YES" if self.is_triggered() else "NO", self.is_trigger,
-               self.trigger_index,
-               errors if errors else "None",
-               self.trigger_timestamp))
 
 
 def load_config(config):
