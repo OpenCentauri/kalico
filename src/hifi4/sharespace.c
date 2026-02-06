@@ -86,8 +86,11 @@ void sharespace_fake_init(void) {
 
 // Waits for the ARM core to initialize its side of the shared memory.
 static void sharespace_reinit(MsgHead *p_arm_head) {
+    uint32_t prev_init_state;
+    uint32_t prev_write_addr;
+    uint32_t prev_read_addr;
     // hal_debug_print("sharespace_reinit: Waiting for ARM initialization...\n");
-    delay_us(10000); // sleep 10 seconds before looping
+    // delay_us(10000); // sleep 10 seconds before looping
     while (1) {
         // hal_debug_variable("sharespace_reinit: Reading ARM head from ", (uint32_t)arm_head_ptr);
         memcpy(p_arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
@@ -98,19 +101,29 @@ static void sharespace_reinit(MsgHead *p_arm_head) {
         if ((p_arm_head->init_state == 1 || p_arm_head->init_state == 2) &&
             p_arm_head->write_addr != 0xa5a5a5a5 &&
             p_arm_head->read_addr != 0xa5a5a5a5) {
+            
+            // We are running from uncached memory without syncronisation
+            // so check the values have stabilised
+            if (p_arm_head->init_state == prev_init_state &&
+                p_arm_head->write_addr == prev_write_addr &&
+                p_arm_head->read_addr == prev_read_addr) {
 
-            if (p_arm_head->init_state == 2) {
-                p_arm_head->init_state = 1;
-                memcpy((void*)arm_head_ptr, p_arm_head, sizeof(MsgHead));
+                if (p_arm_head->init_state == 2) {
+                    p_arm_head->init_state = 1;
+                    memcpy((void*)arm_head_ptr, p_arm_head, sizeof(MsgHead));
+                }
+
+                hal_debug_variable("sharespace_reinit: arm_head.init_state = ", p_arm_head->init_state);
+                hal_debug_variable("sharespace_reinit: arm_head.write_addr = ", p_arm_head->write_addr);
+                hal_debug_variable("sharespace_reinit: arm_head.read_addr  = ", p_arm_head->read_addr);
+                hal_debug_print("sharespace_reinit: Sync complete.\n");
+                return;
             }
-
-            hal_debug_variable("sharespace_reinit: arm_head.init_state = ", p_arm_head->init_state);
-            hal_debug_variable("sharespace_reinit: arm_head.write_addr = ", p_arm_head->write_addr);
-            hal_debug_variable("sharespace_reinit: arm_head.read_addr  = ", p_arm_head->read_addr);
-            hal_debug_print("sharespace_reinit: Sync complete.\n");
-            return;
+            prev_init_state = p_arm_head->init_state;
+            prev_write_addr = p_arm_head->write_addr;
+            prev_read_addr = p_arm_head->read_addr;
         }
-        delay_us(2000); // sleep 2 seconds between iterations
+        // delay_us(2000); // sleep 2 seconds between iterations
     }
 }
 
@@ -153,9 +166,12 @@ void sharespace_init(void) {
     hal_debug_variable("sharespace_init: arm_head_ptr is now at ", (uint32_t)arm_head_ptr);
     hal_debug_variable("sharespace_init: dsp_head_ptr is now at ", (uint32_t)dsp_head_ptr);
 
+    MsgHead arm_head;
+    memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
+
     MsgHead dsp_head = {
-        .read_addr = MIN_ADDR,
-        .write_addr = MIN_ADDR,
+        .read_addr = arm_head.write_addr,
+        .write_addr = arm_head.read_addr,
         .init_state = 1
     };
     // hal_debug_variable("sharespace_init: Initializing DSP head: read_addr  = ", dsp_head.read_addr);
@@ -168,10 +184,9 @@ void sharespace_init(void) {
 
     msgbox_send_signal((dsp_head.write_addr<<16) + dsp_head.read_addr);
 
-    MsgHead arm_head;
     hal_debug_print("sharespace_init: Waiting for ARM to acknowledge with init_state=1.\n");
     while (1) {
-        dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
+        // dcache_region_invalidate((void*)arm_head_ptr, sizeof(MsgHead));
         memcpy(&arm_head, (const void*)arm_head_ptr, sizeof(MsgHead));
         // hal_debug_variable("sharespace_init: Polling ARM head (from kbuf): init_state = ", arm_head.init_state);
         if (arm_head.init_state == 1) {
