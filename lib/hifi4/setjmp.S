@@ -42,6 +42,12 @@ setjmp:
 	.global	longjmp
 	.type	longjmp, @function
 longjmp:
+	/* Exit EXCM mode if called from an interrupt */
+    wsr.ps	a12
+    movi    a13, ~(1 << 4)
+    and		a12, a12, a13
+    wsr.ps	a12
+    isync
 	l32i	a0, a2, 0
 	l32i	a12, a2, 8
 	l32i	a13, a2, 12
