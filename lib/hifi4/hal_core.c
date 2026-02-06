@@ -434,14 +434,23 @@ void delay_ms(uint32_t ms)
  * HAL Initialization
  *============================================================================*/
 
+void save_data(void)
+{
+    extern char _data_start, _data_end, _copy_start;
+    memcpy (&_copy_start, &_data_start, &_data_end - &_data_start);
+}
+
 void hal_init(void)
 {
+    save_data();
+
     /* Clear interrupt handler tables */
     memset(irq_table, 0, sizeof(irq_table));
     memset(intc_table, 0, sizeof(intc_table));
     
     /* Disable all Xtensa core interrupt inputs */
     xtensa_set_intenable(0);
+    xtensa_clear_interrupt(0xFFFFFFFF);
     
     /* 
      * Initialize DSP_INTC (peripheral interrupt controller)
@@ -513,6 +522,12 @@ void hal_debug_variable(const char *str, uint32_t value)
     uart_puts(UART_0, "\n");
 }
 
+void restore_data(void)
+{
+    extern char _data_start, _data_end, _copy_start;
+    memcpy (&_data_start, &_copy_start, &_data_end - &_data_start);
+}
+
 void hal_restart(void)
 {
     /* Disable all interrupts */
@@ -520,6 +535,11 @@ void hal_restart(void)
     
     /* Clear INTENABLE to prevent any interrupt from firing */
     __asm__ volatile("wsr.intenable %0" :: "a"(0));
+    __asm__ volatile("wsr.intclear %0; rsync" :: "a"(0xFFFFFFFF));
+
+    /* Reset processor state - clear EXCM and INTLEVEL */
+    /* Needed if called from an interrupt handler */
+    __asm__ volatile("wsr.ps %0; rsync" :: "a"(0));
     
     /* Flush data cache to ensure memory is consistent */
     dcache_writeback_all();
@@ -530,6 +550,8 @@ void hal_restart(void)
     /* Memory barrier */
     __asm__ volatile("dsync");
     __asm__ volatile("isync");
+
+    restore_data();
 
     extern void _start(void);
 

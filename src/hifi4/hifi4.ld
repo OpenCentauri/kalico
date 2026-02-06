@@ -84,12 +84,21 @@ SECTIONS
     } > ddr1 :ddr1_phdr
     
     .data : ALIGN(4) {
+        _data_start = ABSOLUTE(.);
         *(.data .data.*)
         *(.gnu.linkonce.d.*)
         *(.data1)
         *(.sdata .sdata.* .sdata2.*)
         *(.gnu.linkonce.s.*)
+        . = ALIGN(4);
+        _data_end = ABSOLUTE(.);
     } > ddr1 :ddr1_phdr
+
+    .copy (NOLOAD) : ALIGN(4) {
+        _copy_start = ABSOLUTE(.);
+        . += (_data_end - _data_start);
+        _data_backup_end = ABSOLUTE(.);
+    } > ddr1 :NONE
     
     .bss (NOLOAD) : ALIGN(4) {
         _bss_start = ABSOLUTE(.);
@@ -101,20 +110,20 @@ SECTIONS
         *(COMMON)
         . = ALIGN(4);
         _bss_end = ABSOLUTE(.);
-    } > ddr1 :ddr1_phdr
+    } > ddr1 :NONE
     
     /* Heap section - place after BSS */
     .heap (NOLOAD) : ALIGN(8) {
         _heap_start = ABSOLUTE(.);
         . = . + 0x10000;  /* 64KB heap */
         _heap_end = ABSOLUTE(.);
-    } > ddr1 :ddr1_phdr
+    } > ddr1 :NONE
 
     /* Reserve space for stack at end of DDR - MOVED AFTER HEAP */
     .stack (NOLOAD) : ALIGN(16) {
         . = . + 0x8000;  /* 32KB stack */
         _stack_end = ABSOLUTE(.);
-    } > ddr1 :ddr1_phdr
+    } > ddr1 :NONE
     
     /* Update stack pointer to point to END of stack section */
     PROVIDE(__stack = _stack_end);
