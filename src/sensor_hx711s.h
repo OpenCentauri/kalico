@@ -37,6 +37,7 @@ struct trsync;
 enum hx711s_flags {
     HX711S_FLAG_START = 1 << 0,
     HX711S_FLAG_AWAIT_HOMING = 1 << 1,
+    HX711S_FLAG_PENDING = 1 << 2,  // ADC data ready, task should read
 };
 
 // Strain gauge mode (chip and bridge type)
@@ -86,6 +87,7 @@ struct hx711s_sensor {
     // Probe state
     int32_t probe_check_cmd;
     uint8_t flags;                  // bit 0 = START, bit 1 = AWAIT_HOMING
+    uint8_t pending_sensor;          // sensor index found ready by timer ISR
     uint32_t homing_clock;          // Clock at which homing starts and triggers are awaited
     uint8_t is_calibration;         // bit 0 = calibration mode, bit 7 = calibration complete, bi 0 = ch1, 1 = ch2, etc.
     uint8_t is_trigger;             // Last trigger (bit coded by channel) bit 0 = ch1, 1 = ch2, etc.; bit 5 = fusion

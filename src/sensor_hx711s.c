@@ -207,48 +207,35 @@ hx711s_delay_ns(uint32_t ns)
         ;
 }
 
-// Read single sensor via bit-banging
-// Returns 1 on success, 0 if sensor not ready
-static uint8_t
+// Read single sensor via bit-banging.
+// Called from the background task after the timer ISR confirmed DOUT is low.
+static void
 hx711s_read_sensor(struct hx711s_sensor *h, uint8_t sensor_idx)
 {
-    if (sensor_idx >= h->hx711_count)
-        return 0;
-
-    // Check if ADC ready (DOUT low)
-    uint8_t ready = !gpio_in_read(h->sdos[sensor_idx]);
-
-    // Wait up to 3ms for data ready
-    for (int i = 0; i < 3000 && !ready; i++) {
-        hx711s_delay_ns(1000);
-        ready = !gpio_in_read(h->sdos[sensor_idx]);
-    }
-
-    if (!ready)
-        return 0;
-
-    irq_disable();
-
     // Capture the timestamp as early as possible to minimize timing errors.
-    int capture_time = timer_read_time();
+    uint32_t capture_time = timer_read_time();
 
     gpio_out_write(h->clks[sensor_idx], 0);
 
+    // Read 24 data bits
     int32_t value = 0;
     for (int i = 0; i < 24; i++) {
+        irq_disable();
         gpio_out_write(h->clks[sensor_idx], 1);
         hx711s_delay_ns(HX711S_MIN_PULSE_NS);
-        value = value << 1;
         gpio_out_write(h->clks[sensor_idx], 0);
-        hx711s_delay_ns(HX711S_MIN_PULSE_NS);
         if (gpio_in_read(h->sdos[sensor_idx]))
-            value |= 1;
+            value |= 1 << (23 - i);
+        irq_enable();
+        hx711s_delay_ns(HX711S_MIN_PULSE_NS);
     }
 
     // Extra clock pulse to set gain for next conversion
+    irq_disable();
     gpio_out_write(h->clks[sensor_idx], 1);
     hx711s_delay_ns(HX711S_MIN_PULSE_NS);
     gpio_out_write(h->clks[sensor_idx], 0);
+    irq_enable();
 
     // Sign extend 24-bit to 32-bit
     if (value & 0x00800000)
@@ -256,9 +243,6 @@ hx711s_read_sensor(struct hx711s_sensor *h, uint8_t sensor_idx)
 
     h->sample_values[sensor_idx] = value;
     h->time_stamp[sensor_idx] = capture_time;
-
-    irq_enable();
-    return 1;
 }
 
 /****************************************************************
@@ -299,9 +283,8 @@ calibration_collect(struct hx711s_sensor *h, uint8_t sensor_idx)
         return 1;
     }
 
-    // Read sensor
-    if (!hx711s_read_sensor(h, sensor_idx))
-        return 1;  // Continue trying
+    // Read sensor (timer ISR already confirmed DOUT is low)
+    hx711s_read_sensor(h, sensor_idx);
 
     // Store sample
     if ((sensor_idx + 1) == h->hx711_count)
@@ -650,12 +633,28 @@ static uint_fast8_t
 hx711s_timer_event(struct timer *t)
 {
     struct hx711s_sensor *h = container_of(t, struct hx711s_sensor, timer);
-    sched_wake_task(&hx711s_wake);
-    h->timer.waketime += h->rest_ticks;
+    uint32_t rest_ticks = h->rest_ticks;
 
-    if (h->flags & HX711S_FLAG_START)
-        return SF_RESCHEDULE;
-    return SF_DONE;
+    if (!(h->flags & HX711S_FLAG_START))
+        return SF_DONE;
+
+    if (h->flags & HX711S_FLAG_PENDING) {
+        // Previous sample not yet consumed — back off
+        rest_ticks *= 4;
+    } else {
+        // Check each sensor in rotation for data ready (DOUT low)
+        for (uint8_t i = 0; i < h->hx711_count; i++) {
+            if (!gpio_in_read(h->sdos[i])) {
+                h->pending_sensor = i;
+                h->flags |= HX711S_FLAG_PENDING;
+                sched_wake_task(&hx711s_wake);
+                break;
+            }
+        }
+    }
+
+    h->timer.waketime += rest_ticks;
+    return SF_RESCHEDULE;
 }
 
 /****************************************************************
@@ -848,17 +847,16 @@ hx711s_task(void)
     struct hx711s_sensor *h;
 
     foreach_oid(oid, h, command_config_hx711s) {
-        if (!(h->flags & HX711S_FLAG_START))
+        if (!(h->flags & HX711S_FLAG_PENDING))
             return;
 
-        // Rotate through sensors
-        if (h->hx711_count == 4) {
-            // Swap order for proper scanning
-            static const uint8_t order[] = {2, 3, 1, 0};
-            sensor_idx = order[loop % 4];
-        } else {
-            sensor_idx = loop % h->hx711_count;
-        }
+        // Use the sensor index that the timer ISR found ready
+        sensor_idx = h->pending_sensor;
+
+        // Clear pending flag so the timer ISR can signal again
+        irq_disable();
+        h->flags &= ~HX711S_FLAG_PENDING;
+        irq_enable();
 
         loop++;
 
@@ -872,9 +870,8 @@ hx711s_task(void)
 
         uint32_t now_tick = timer_read_time();
 
-        // Sampling phase
-        if (!hx711s_read_sensor(h, sensor_idx))
-          continue;
+        // Read the ADC (timer ISR already confirmed DOUT is low)
+        hx711s_read_sensor(h, sensor_idx);
 
         // Wait for homing_clock before enabling trigger detection
         if (h->flags & HX711S_FLAG_AWAIT_HOMING) {
