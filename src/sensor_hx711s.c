@@ -14,7 +14,6 @@
 #include "trsync.h"  // trsync_do_trigger
 #include "sensor_hx711s.h"
 #include <string.h>
-#include <math.h>
 
 /****************************************************************
  * Module State
@@ -361,8 +360,7 @@ hx711s_fusion_filter(struct hx711s_sensor *h, uint8_t sensor_idx,
 static int32_t
 find_trigger_index_new(int32_t *array, struct hx711s_sensor *h)
 {
-    double val[HX711S_MAX_DATA_NUM] = {0};
-    double val_transfer[HX711S_MAX_DATA_NUM] = {0};
+    int32_t val[HX711S_MAX_DATA_NUM] = {0};
     int max_num = h->max_data_num;
 
     // Ensure data direction is ascending
@@ -374,39 +372,29 @@ find_trigger_index_new(int32_t *array, struct hx711s_sensor *h)
             val[i] = array[i];
     }
 
-    // Normalize data to [0..1]
-    double val_min = val[max_num - 1], val_max = val[0];
-    for (int i = 0; i < max_num; i++) {
+    // Find minimum for offset removal
+    int32_t val_min = val[0];
+    for (int i = 1; i < max_num; i++) {
         if (val[i] < val_min) val_min = val[i];
-        if (val[i] > val_max) val_max = val[i];
-    }
-    double val_err = val_max - val_min;
-    if (val_err < 1e-15) val_err = 1e-15; // prevent division by zero
-
-    for (int i = 0; i < max_num; i++)
-        val_transfer[i] = (val[i] - val_min) / val_err;
-
-
-    // Calculate and rotate the data by a given angle to facilitate the c
-    // calculation of the earliest trigger point
-    double angle = atan((val_transfer[max_num - 1] - val_transfer[0]) /
-                          (max_num - 1));
-    double sinAngle = sin(-angle);
-    double cosAngle = cos(-angle);
-
-    // Rotate around the origin (0,0) by angle degrees clockwise.
-    // Here we can ignore the X-axis coordinate values.
-    for (int i = 0; i < max_num; i++) {
-      val_transfer[i] =
-          ((i - 0) * sinAngle) + ((val_transfer[i] - 0) * cosAngle) + 0;
     }
 
-    // Find the index of the minimum value after rotation
+    // Rotate data to find earliest trigger point using pure integer math.
+    // Instead of normalizing to [0,1] and computing atan()/sin()/cos()
+    // we use the algebraic identity directly:
+    //   rotated_y[i] = -dv * i + dx * (val[i] - val_min)
+    // where dv = val[last]-val[0], dx = last.
+    // The normalization to [0,1] and the scale factor 1/hypot(dx,dv)
+    // are uniform transforms that don't affect which index has the
+    // minimum, so they are omitted entirely.
+    int32_t dv = val[max_num - 1] - val[0]; // >= 0 (ascending)
+    int32_t dx = max_num - 1;
+
     int32_t out_index = 0;
-    double min_val = val_transfer[0];
+    int32_t min_rot = dx * (val[0] - val_min); // i=0 term
     for (int i = max_num - 1; i >= 0; i--) {
-        if (min_val > val_transfer[i]) {
-            min_val = val_transfer[i];
+        int32_t rot = -dv * i + dx * (val[i] - val_min);
+        if (min_rot > rot) {
+            min_rot = rot;
             out_index = i;
         }
     }
@@ -551,30 +539,28 @@ check_trigger(int32_t *data, struct hx711s_sensor *h)
             return 0;
     }
 
-    // Normalize data
-    double val_min = +0xFFFFFFFF, val_max = -0x00FFFFFF, val_avg = 0;
-    for (int i = 0; i < max_num; i++) {
-        if (data[i] < val_min) val_min = data[i];
-        if (data[i] > val_max) val_max = data[i];
-        val_avg += data[i];
+    // Slope check using pure integer math
+    int32_t ival_min = data[0], ival_max = data[0];
+    for (int i = 1; i < max_num; i++) {
+        if (data[i] < ival_min) ival_min = data[i];
+        if (data[i] > ival_max) ival_max = data[i];
     }
-    val_avg /= max_num;
-    double val_err = val_max - val_min;
-    if (val_err < 1e-15) val_err = 1e-15; // prevent division by zero
-
-    double val_p[HX711S_MAX_DATA_NUM];
-    for (int i = 0; i < max_num; i++)
-        val_p[i] = (data[i] - val_min) / val_err;
+    int32_t val_range = ival_max - ival_min;
+    if (val_range == 0)
+        return 0; // Flat data, no trigger possible
 
     // Ensure that the slope of all points relative to the last point is
-    // greater than 40 degrees, which can prevent false triggers caused by
+    // greater than ~40 degrees, which prevents false triggers caused by
     // being too sensitive.
     for (int i = 0; i < max_num - 1; i++) {
-        double k = (val_p[max_num - 1] - val_p[i]) /
-                   ((max_num - 1 - i) * 1.0 / max_num);
-        if (hx711s_abs(k) < 0.8)
+        int32_t diff = data[max_num - 1] - data[i];
+        int32_t dist = max_num - 1 - i;
+        // Reject if slope angle < ~40deg: |k| < 0.8
+        if (hx711s_abs(diff) * max_num * 5 < val_range * dist * 4)
             return 0;
-        if (h->enable_shake_filter && k > 0.8)
+        // Shake filter: reject positive steep slopes (k > 0.8)
+        if (h->enable_shake_filter
+            && diff * max_num * 5 > val_range * dist * 4)
             return 0;
     }
 
