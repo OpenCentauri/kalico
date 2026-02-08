@@ -28,7 +28,3 @@ src-$(CONFIG_WANT_ADS1220) += sensor_ads1220.c
 src-$(CONFIG_WANT_SENSOR_ANGLE) += sensor_angle.c
 src-$(CONFIG_NEED_SENSOR_BULK) += sensor_bulk.c
 src-$(CONFIG_WANT_HX711S) += sensor_hx711s.c
-
-ifeq ($(CONFIG_WANT_HX711S), y)
-    CFLAGS += -lm
-endif
