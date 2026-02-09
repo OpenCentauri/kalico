@@ -746,6 +746,7 @@ command_hx711s_home(uint32_t *args)
     h->is_trigger = 0;
     h->trigger_tick = 0;
     h->trigger_index = 0;
+    h->flags = 0;
 
     // If trsync_oid is 0, homing is finished
     if (args[1] == 0) {
