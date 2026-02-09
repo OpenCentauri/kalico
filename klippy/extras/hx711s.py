@@ -107,6 +107,7 @@ class HX711SEndstopWrapper:
         # Wait for pending moves (retract) to complete before calibrating
         # so the sensor baseline isn't contaminated by bed contact
         toolhead.wait_moves()
+        toolhead.dwell(0.100)
         if not self._hx711s.calibration_start(30, 5.0):
             raise self._printer.command_error(
                 "HX711S: Calibration failed before probe")
@@ -120,6 +121,9 @@ class HX711SEndstopWrapper:
         pass
 
     def probe_prepare(self, hmove):
+        toolhead = self._printer.lookup_object('toolhead')
+        toolhead.wait_moves()
+        toolhead.dwell(0.100)
         pass
 
     def probe_finish(self, hmove):
