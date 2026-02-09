@@ -22,7 +22,9 @@ struct trsync;
 // Maximum number of sensors (4 physical + 1 fusion channel)
 #define HX711S_MAX_SENSOR_NUM   5
 // Maximum sliding window data points
-#define HX711S_MAX_DATA_NUM     30
+#define HX711S_MAX_DATA_NUM     16
+// Maximum calibration samples per sensor
+#define HX711S_MAX_CAL_SAMPLES  1000
 // Maximum sensors per device
 #define HX711S_MAX_SENSORS      4
 
