@@ -29,9 +29,13 @@ static int32_t bias_slope;   // Slope-to-rollback ratio
 static int32_t data_list[HX711S_MAX_SENSOR_NUM][HX711S_MAX_DATA_NUM];
 static uint32_t timestamp_list[HX711S_MAX_SENSOR_NUM][HX711S_MAX_DATA_NUM];
 
-// High-pass filter state
-static struct hx711s_hpf_params hpf_params;
+// High-pass filter state (one per physical sensor + one for fusion channel)
+static struct hx711s_hpf_params hpf_params[HX711S_MAX_SENSORS];
 static struct hx711s_hpf_params fusion_hpf_params;
+
+// Sliding window filter state
+static int sw_data_count[HX711S_MAX_SENSOR_NUM];
+static int32_t sw_last_out[HX711S_MAX_SENSOR_NUM];
 
 /****************************************************************
  * Utility Functions
@@ -62,16 +66,19 @@ bubble_sort(int32_t *array, int len)
 static int32_t
 median_filter(int32_t *array, int len)
 {
-    int32_t sorted[1000];
-    if (len > 1000)
-        len = 1000;
+    static int32_t sorted[HX711S_MAX_CAL_SAMPLES];
+
+    if (len > HX711S_MAX_CAL_SAMPLES)
+        len = HX711S_MAX_CAL_SAMPLES;
+    if (len < 1)
+        return 0;
     memcpy(sorted, array, len * sizeof(int32_t));
     bubble_sort(sorted, len);
 
     if (len & 1)
-        return sorted[(len + 1) / 2];
+        return sorted[len / 2];
     else
-        return (sorted[len / 2] + sorted[len / 2 + 1]) / 2;
+        return (sorted[len / 2 - 1] + sorted[len / 2]) / 2;
 }
 
 /****************************************************************
@@ -132,28 +139,25 @@ sliding_window_avg_exception_filter(int index, int max_data_num,
                                     uint32_t timestamp, int32_t exception_th,
                                     uint8_t enable_hpf)
 {
-    static int data_count[HX711S_MAX_SENSOR_NUM] = {0};
-    static int32_t last_out[HX711S_MAX_SENSOR_NUM] = {0};
-
     if (max_data_num < 2 || max_data_num > HX711S_MAX_DATA_NUM ||
         index >= HX711S_MAX_SENSOR_NUM)
         return 0;
 
     int32_t filter_data = *data;
 
-    // Apply high-pass filter if enabled
+    // Apply high-pass filter if enabled (per-sensor state)
     if (enable_hpf) {
         if (index == 4)
             filter_data = hpf_apply(&fusion_hpf_params, *data);
         else
-            filter_data = hpf_apply(&hpf_params, *data);
+            filter_data = hpf_apply(&hpf_params[index], *data);
     }
 
     // Check for outlier
-    if (exception_th > 0 && last_out[index] != 0) {
-        int32_t diff = last_out[index] - filter_data;
+    if (exception_th > 0 && sw_last_out[index] != 0) {
+        int32_t diff = sw_last_out[index] - filter_data;
         if (hx711s_abs(diff) > exception_th) {
-            *data = last_out[index];
+            *data = sw_last_out[index];
             return 0;
         }
     }
@@ -166,11 +170,11 @@ sliding_window_avg_exception_filter(int index, int max_data_num,
     int32_t sum = 0;
     int32_t out;
 
-    if (data_count[index] < max_data_num) {
-        data_count[index]++;
-        for (int i = 0; i < data_count[index]; i++)
+    if (sw_data_count[index] < max_data_num) {
+        sw_data_count[index]++;
+        for (int i = 0; i < sw_data_count[index]; i++)
             sum += data_list[index][i];
-        out = sum / data_count[index];
+        out = sum / sw_data_count[index];
     } else {
         // Sort and trim extremes
         int32_t sorted[HX711S_MAX_DATA_NUM];
@@ -186,7 +190,7 @@ sliding_window_avg_exception_filter(int index, int max_data_num,
     if (out == 0)
         out = 1;
 
-    last_out[index] = out;
+    sw_last_out[index] = out;
     return 1;
 }
 
@@ -254,7 +258,7 @@ static uint8_t
 calibration_collect(struct hx711s_sensor *h, uint8_t sensor_idx)
 {
     static int32_t sample_count[4] = {0};
-    static int32_t samples[4][1000];
+    static int32_t samples[4][HX711S_MAX_CAL_SAMPLES];
     static int32_t sensor_min[4] = {0};
     static int32_t sensor_max[4] = {0};
 
@@ -278,6 +282,8 @@ calibration_collect(struct hx711s_sensor *h, uint8_t sensor_idx)
                 return 0;
             }
             sample_count[j] = 0;
+            sensor_min[j] = 0;
+            sensor_max[j] = 0;
         }
         return 1;
     }
@@ -293,6 +299,9 @@ calibration_collect(struct hx711s_sensor *h, uint8_t sensor_idx)
         sensor_min[sensor_idx] = h->sample_values[sensor_idx];
     if (sensor_max[sensor_idx] == 0)
         sensor_max[sensor_idx] = h->sample_values[sensor_idx];
+
+    if (sample_count[sensor_idx] >= HX711S_MAX_CAL_SAMPLES)
+        return 0;
 
     samples[sensor_idx][sample_count[sensor_idx]] = h->sample_values[sensor_idx];
 
@@ -556,11 +565,13 @@ check_trigger(int32_t *data, struct hx711s_sensor *h)
         int32_t diff = data[max_num - 1] - data[i];
         int32_t dist = max_num - 1 - i;
         // Reject if slope angle < ~40deg: |k| < 0.8
-        if (hx711s_abs(diff) * max_num * 5 < val_range * dist * 4)
+        if ((int64_t)hx711s_abs(diff) * max_num * 5
+            < (int64_t)val_range * dist * 4)
             return 0;
         // Shake filter: reject positive steep slopes (k > 0.8)
         if (h->enable_shake_filter
-            && diff * max_num * 5 > val_range * dist * 4)
+            && (int64_t)diff * max_num * 5
+               > (int64_t)val_range * dist * 4)
             return 0;
     }
 
@@ -663,9 +674,6 @@ command_config_hx711s(uint32_t *args)
 
     h->sg_mode = (args[3] & 0x0F000000) >> 24;
 
-    // Default to full bridge HX711 mode for vanilla klipper
-    h->sg_mode = SG_MODE_HX711_FULL_BRIDGE;
-
     h->find_index_mode = (args[2] & 0xF000) >> 12;
 
     if (h->sg_mode == SG_MODE_HX717_HALF_BRIDGE) {
@@ -702,7 +710,8 @@ command_config_hx711s(uint32_t *args)
 
     // Initialize high-pass filters
     float sample_rate = 1000000.0f / h->sample_period / h->hx711_count;
-    hpf_init(&hpf_params, 5.0f, sample_rate, 0);
+    for (int i = 0; i < (int)h->hx711_count; i++)
+        hpf_init(&hpf_params[i], 5.0f, sample_rate, 0);
     hpf_init(&fusion_hpf_params, 5.0f, 1000000.0f / h->sample_period, 0);
 
     sendf("debug_hx711s oid=%c arg[0]=%u arg[1]=%u arg[2]=%u arg[3]=%u",
@@ -785,8 +794,8 @@ command_calibration_sample(uint32_t *args)
     h->times_read = args[1];
     if (h->times_read < 1)
         h->times_read = 50;
-    else if (h->times_read > 1000)
-        h->times_read = 1000;
+    else if (h->times_read > HX711S_MAX_CAL_SAMPLES)
+        h->times_read = HX711S_MAX_CAL_SAMPLES;
 
     h->rest_ticks = ori_rest_ticks;
     h->is_calibration = 0;
@@ -796,6 +805,8 @@ command_calibration_sample(uint32_t *args)
     memset(h->sample_values, 0, sizeof(h->sample_values));
     memset(data_list, 0, sizeof(data_list));
     memset(timestamp_list, 0, sizeof(timestamp_list));
+    memset(sw_data_count, 0, sizeof(sw_data_count));
+    memset(sw_last_out, 0, sizeof(sw_last_out));
 
     h->is_trigger = 0;
     h->trigger_tick = 0;
@@ -835,7 +846,7 @@ hx711s_task(void)
 
     foreach_oid(oid, h, command_config_hx711s) {
         if (!(h->flags & HX711S_FLAG_PENDING))
-            return;
+            continue;
 
         // Use the sensor index that the timer ISR found ready
         sensor_idx = h->pending_sensor;
@@ -918,8 +929,6 @@ hx711s_task(void)
                       (uint32_t)h->trigger_tick,
                       (uint32_t)h->is_trigger,
                       (uint32_t)now_tick);
-
-                h->times_read--;
             }
 
             last_is_trigger = h->is_trigger;
