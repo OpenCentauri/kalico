@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - hifi4
+      - open-centauri
 
 jobs:
   build:
