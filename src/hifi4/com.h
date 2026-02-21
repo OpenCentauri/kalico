@@ -3,6 +3,6 @@
 
 #include <stdint.h> // uint32_t
 
-void sharespace_notify_consume(void);
+void rpmsg_notify_rx(const void *data, uint32_t len);
 
 #endif // com.h

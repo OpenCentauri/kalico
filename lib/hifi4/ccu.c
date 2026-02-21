@@ -240,3 +240,21 @@ void ccu_dsp_set_clk_divisor(uint8_t factor_m)
     val |= CCU_DSP_CLK_FACTOR_M(factor_m);
     ccu_write_reg(CCU_DSP_CLK, val);
 }
+
+void ccu_dsp_set_clk_src(dsp_clk_src src)
+{
+    uint32_t val = ccu_read_reg(CCU_DSP_CLK);
+    val &= ~CCU_DSP_CLK_SRC_MASK;
+    val |= CCU_DSP_CLK_SRC(src);
+    ccu_write_reg(CCU_DSP_CLK, val);
+}
+
+void ccu_dsp_set_clk(dsp_clk_src src, uint8_t factor_m)
+{
+    uint32_t val = ccu_read_reg(CCU_DSP_CLK);
+    val &= ~CCU_DSP_CLK_SRC_MASK;
+    val |= CCU_DSP_CLK_SRC(src);
+    val &= ~CCU_DSP_CLK_FACTOR_M_MASK;
+    val |= CCU_DSP_CLK_FACTOR_M(factor_m);
+    ccu_write_reg(CCU_DSP_CLK, val);
+}

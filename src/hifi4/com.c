@@ -10,7 +10,7 @@
 #include "command.h" // DECL_CONSTANT
 #include "sched.h" // sched_wake_tasks
 #include "com.h" // msgbox_enable_tx_irq
-#include "sharespace.h" // sharespace_read
+#include "rpmsg.h"
 
 #define RX_BUFFER_SIZE 192
 #define TX_BUFFER_SIZE 192
@@ -21,77 +21,100 @@ static uint8_t transmit_buf[TX_BUFFER_SIZE], transmit_pos;
 DECL_CONSTANT("RECEIVE_WINDOW", RX_BUFFER_SIZE);
 DECL_CONSTANT("TRANSMIT_WINDOW", TX_BUFFER_SIZE);
 
+// RPMsg endpoint — set by rpmsg_transport_init()
+static struct rpmsg_endpoint *klipper_ept;
+
+void
+com_set_endpoint(struct rpmsg_endpoint *ept)
+{
+    klipper_ept = ept;
+}
+
 /****************************************************************
  * Message block reading
  ****************************************************************/
 
-static struct task_wake sharespace_consume_wake;
+static struct task_wake rpmsg_consume_wake;
 
+// Called from RPMsg endpoint callback (interrupt context)
 void
-sharespace_notify_consume(void)
+rpmsg_notify_rx(const void *data, uint32_t len)
 {
-    sched_wake_task(&sharespace_consume_wake);
+    // Copy incoming RPMsg payload into the receive buffer
+    uint_fast8_t rpos = receive_pos;
+    uint_fast8_t space = sizeof(receive_buf) - rpos;
+
+    if (len > space)
+        len = space;  // Drop excess if buffer is full
+
+    if (len > 0) {
+        memcpy(&receive_buf[rpos], data, len);
+        receive_pos = rpos + len;
+    }
+
+    sched_wake_task(&rpmsg_consume_wake);
 }
 
 // Process any incoming commands
 void
-sharespace_consume_task(void)
+rpmsg_consume_task(void)
 {
-    if (!sched_check_wake(&sharespace_consume_wake))
+    if (!sched_check_wake(&rpmsg_consume_wake))
         return;
+
     uint_fast8_t rpos = receive_pos, pop_count;
-    uint_fast8_t rmax = sizeof(receive_buf) - rpos;
-    int_fast8_t ret = sharespace_read(&receive_buf[receive_pos], rmax);
-    if (ret > 0) {
-        rpos += ret;
-        sharespace_notify_consume();
-    }
+
     // Process a message block
-    ret = command_find_and_dispatch(receive_buf, rpos, &pop_count);
+    int_fast8_t ret = command_find_and_dispatch(receive_buf, rpos, &pop_count);
     if (ret) {
         // Move buffer
         uint_fast8_t needcopy = rpos - pop_count;
-        if (needcopy) {
+        if (needcopy)
             memmove(receive_buf, &receive_buf[pop_count], needcopy);
-            sharespace_notify_consume();
-        }
         rpos = needcopy;
     }
     receive_pos = rpos;
 }
-DECL_TASK(sharespace_consume_task);
+DECL_TASK(rpmsg_consume_task);
 
 /****************************************************************
  * Message block sending
  ****************************************************************/
 
-static struct task_wake sharespace_send_wake;
+static struct task_wake rpmsg_send_wake;
 
 void
-sharespace_notify_send(void)
+rpmsg_notify_send(void)
 {
-    sched_wake_task(&sharespace_send_wake);
+    sched_wake_task(&rpmsg_send_wake);
 }
 
 void
-sharespace_send_task(void)
+rpmsg_send_task(void)
 {
-    if (!sched_check_wake(&sharespace_send_wake))
+    if (!sched_check_wake(&rpmsg_send_wake))
         return;
+
     uint_fast8_t tpos = transmit_pos;
-    if (!tpos)
+    if (!tpos || !klipper_ept)
         return;
-    int_fast8_t ret = sharespace_write(transmit_buf, tpos);
-    if (ret <= 0)
+
+    // Don't attempt to send until Linux has connected
+    if (klipper_ept->dst == RPMSG_ADDR_ANY)
+        return;  // Drop data — Linux hasn't opened the tty yet
+
+    // Send the entire pending buffer as one RPMsg message
+    int ret = rpmsg_sendto(klipper_ept, transmit_buf, tpos);
+    if (ret < 0) {
+        // No TX buffer available — retry later
+        sched_wake_task(&rpmsg_send_wake);
         return;
-    uint_fast8_t needcopy = tpos - ret;
-    if (needcopy) {
-        memmove(transmit_buf, &transmit_buf[ret], needcopy);
-        sharespace_notify_send();
     }
-    transmit_pos = needcopy;
+
+    // All data sent successfully
+    transmit_pos = 0;
 }
-DECL_TASK(sharespace_send_task);
+DECL_TASK(rpmsg_send_task);
 
 void
 console_sendf(const struct command_encoder *ce, va_list args)
@@ -108,5 +131,5 @@ console_sendf(const struct command_encoder *ce, va_list args)
 
     // Start message transmit
     transmit_pos = tpos + msglen;
-    sharespace_notify_send();
+    rpmsg_notify_send();
 }

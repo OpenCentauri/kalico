@@ -444,6 +444,9 @@ void hal_init(void)
 {
     save_data();
 
+    // Set DSP clock source and divider
+    ccu_dsp_set_clk(DSP_CLK_SRC_PLL_PERI, 3);
+
     /* Clear interrupt handler tables */
     memset(irq_table, 0, sizeof(irq_table));
     memset(intc_table, 0, sizeof(intc_table));

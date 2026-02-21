@@ -29,9 +29,10 @@ src-y += hifi4/util.c
 src-y += hifi4/gpio.c
 src-y += hifi4/irq.c
 src-$(CONFIG_SERIAL) += hifi4/serial.c
-src-$(CONFIG_HIFI4_MSGBOX) += hifi4/msgbox.c
+src-$(CONFIG_HIFI4_MSGBOX) += hifi4/resource_table.c
+src-$(CONFIG_HIFI4_MSGBOX) += hifi4/rpmsg_transport.c
 src-$(CONFIG_HIFI4_MSGBOX) += hifi4/com.c
-src-$(CONFIG_HIFI4_MSGBOX) += hifi4/sharespace.c
+src-$(CONFIG_HIFI4_MSGBOX) += hifi4/rpmsg.c
 src-$(CONFIG_HIFI4_WATCHDOG) += hifi4/watchdog.c
 src-y += hifi4/timer.c
 
@@ -57,7 +58,6 @@ src-$(CONFIG_SERIAL) += generic/serial_irq.c
 
 OBJS_klipper.elf += $(OUT)lib/hifi4/startup.o
 OBJS_klipper.elf += $(OUT)lib/hifi4/vectors.o
-OBJS_klipper.elf += $(OUT)lib/hifi4/oemhead.o
 OBJS_klipper.elf += $(OUT)lib/hifi4/setjmp.o
 
 $(OUT)%.o: %.S
