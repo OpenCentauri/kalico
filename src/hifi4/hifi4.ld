@@ -22,7 +22,18 @@ SECTIONS
         _oemhead_text_start = ABSOLUTE(.);
         KEEP(*(.oemhead.text))
     } > iram0 :iram0_phdr
-    
+
+    .resource_table : ALIGN(4) {
+        KEEP(*(.resource_table))
+    } > iram0 :iram0_phdr
+
+    .trace_buf (NOLOAD) : ALIGN(4)
+    {
+        _trace_buf_start = .;
+        KEEP(*(.trace_buf))
+        _trace_buf_end = .;
+    } > ddr1 :NONE
+
     ._xt_int_enter.literal : ALIGN(4) {
         *(._xt_int_enter.literal)
     } > iram0 :iram0_phdr

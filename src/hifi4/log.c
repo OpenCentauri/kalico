@@ -1,54 +1,15 @@
 #include "log.h"
-#include <platform.h>
 #include <hal.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include "sched.h" // DECL_INIT
-#include "util.h" // vsnprintf
+#include "util.h" // memcpy
 
-static volatile uint8_t* log_buffer = NULL;
-static uint32_t log_buffer_size = 0;
-static volatile uint32_t* log_write_ptr = NULL;
+char __attribute__((section(".trace_buf"))) trace_buffer[TRACE_BUF_SIZE];
 
-void log_init(void) {
-    hal_debug_print("Starting DSP Log\n");
-    volatile struct spare_rtos_head_t *pstr = platform_head;
-    volatile struct dts_msg_t *pdts = &pstr->rtos_img_hdr.dts_msg;
-    while (1) {
-        dcache_region_invalidate((void*)pstr, sizeof(struct spare_rtos_head_t));
-        if (pdts->dts_sharespace.status == DTS_OPEN) {
-            log_buffer = (volatile uint8_t*)pdts->dts_sharespace.dsp_log_addr;
-            log_buffer_size = pdts->dts_sharespace.dsp_log_size;
-            break;
-        }
-    }
-
-    hal_debug_print("DSP Log Sharespace Configuration:\n");
-    hal_debug_variable("  DSP Log Address:   ", (unsigned int)log_buffer);
-    hal_debug_variable("  DSP Log Size:      ", log_buffer_size);
-
-    if (log_buffer && log_buffer_size > 4) {
-        log_write_ptr = (volatile uint32_t*)log_buffer;
-        log_clear();
-    }
-    lprintf("DSP Log Sharespace Configuration:\n");
-    lprintf("  DSP Log Address:   0x%x\n", (unsigned int)log_buffer);
-    lprintf("  DSP Log Size:      0x%x\n", log_buffer_size);
-    lprintf("DSP logging kbuf initialized!\n");
-}
-DECL_INIT(log_init);
-
-void log_clear(void) {
-    if (log_write_ptr) {
-        *log_write_ptr = 4; // Start writing after the write pointer itself.
-        memset((void*)(log_buffer + 4), 0, log_buffer_size - 4);
-    }
-}
+static uint32_t trace_pos = 0;
 
 int lprintf(const char *fmt, ...) {
-    if (!log_write_ptr)
-        return 0;
-
     typedef __builtin_va_list va_list;
 
     va_list args;
@@ -228,16 +189,23 @@ int lprintf(const char *fmt, ...) {
     va_end(args);
     int len = out - temp_buffer;
 
-    uint32_t current_write_pos = *log_write_ptr;
+    /*
+     * Linux reads the trace buffer as a flat string up to the first
+     * null byte. Append directly with no gaps. When full, stop writing
+     * (the buffer is 4 KiB — plenty for boot diagnostics).
+     */
+    uint32_t pos = trace_pos;
 
-    if (current_write_pos + len + 1 >= log_buffer_size) {
-        current_write_pos = 4;
-    }
+    if (pos + len >= TRACE_BUF_SIZE)
+        return 0;  // Buffer full, discard
 
-    memcpy((void*)(log_buffer + current_write_pos), temp_buffer, len);
-    *(log_buffer + current_write_pos + len) = '\0';
+    memcpy((void *)(trace_buffer + pos), temp_buffer, len);
+    trace_pos = pos + len;
 
-    *log_write_ptr = current_write_pos + len + 1;
+    // Null-terminate so Linux knows where the content ends,
+    // but don't advance trace_pos past it — next write overwrites it.
+    if (trace_pos < TRACE_BUF_SIZE)
+        trace_buffer[trace_pos] = '\0';
 
     return len;
 }

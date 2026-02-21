@@ -160,9 +160,20 @@
 #define CCU_HSTIMER_GATING  BIT(0)
 #define CCU_HSTIMER_RST     BIT(16)
 
-/* HSTIMER BGR bits */
+/* DSP CLK bits */
+#define CCU_DSP_CLK_SRC_MASK        0x07
+#define CCU_DSP_CLK_SRC(m)          ((m) << 24)  /* Factor M (0-4: /(M+1)) */
 #define CCU_DSP_CLK_FACTOR_M_MASK   0x1F
 #define CCU_DSP_CLK_FACTOR_M(m)     ((m) << 0)  /* Factor M (0-4: /(M+1)) */
+
+/* DSP clock sources */
+typedef enum {
+    DSP_CLK_SRC_HOSC      = 0,
+    DSP_CLK_SRC_CLK32K    = 1,
+    DSP_CLK_SRC_CLK16M    = 2,
+    DSP_CLK_SRC_PLL_PERI  = 3,
+    DSP_CLK_SRC_PLL_AUDIO = 4,
+} dsp_clk_src;
 
 /*============================================================================
  * GPIO Definitions
@@ -669,6 +680,19 @@ void ccu_hstimer_disable(void);
  * @param factor_m Clock divider (M = FACTOR_M + 1)
  */
 void ccu_dsp_set_clk_divisor(uint8_t factor_m);
+
+/**
+ * @brief Set DSP clock source
+ * @param src Clock source
+ */
+void ccu_dsp_set_clk_src(dsp_clk_src src);
+
+/**
+ * @brief Set DSP clock source
+ * @param src Clock source
+ * @param factor_m Clock divider (M = FACTOR_M + 1)
+ */
+void ccu_dsp_set_clk(dsp_clk_src src, uint8_t factor_m);
 
 /*============================================================================
  * Function Prototypes - GPIO
