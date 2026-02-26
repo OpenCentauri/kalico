@@ -434,19 +434,8 @@ void delay_ms(uint32_t ms)
  * HAL Initialization
  *============================================================================*/
 
-void save_data(void)
-{
-    extern char _data_start, _data_end, _copy_start;
-    memcpy (&_copy_start, &_data_start, &_data_end - &_data_start);
-}
-
 void hal_init(void)
 {
-    save_data();
-
-    // Set DSP clock source and divider
-    ccu_dsp_set_clk(DSP_CLK_SRC_PLL_PERI, 3);
-
     /* Clear interrupt handler tables */
     memset(irq_table, 0, sizeof(irq_table));
     memset(intc_table, 0, sizeof(intc_table));
@@ -473,7 +462,7 @@ void hal_init(void)
     REG32(DSP_INTC_BASE + DSP_INTC_PEND1) = 0xFFFFFFFF;
     REG32(DSP_INTC_BASE + DSP_INTC_PEND2) = 0xFFFFFFFF;
 
-    cache_enable_ddr();
+    // cache_enable_ddr();
     watchdog_stop();
 
     /* Enable global interrupts */
@@ -490,7 +479,7 @@ void hal_init(void)
  */
 void hal_debug_hex(uint32_t value)
 {
-    static const char hex_chars[] = "0123456789ABCDEF";
+    char hex_chars[] = "0123456789ABCDEF";
     char buf[11];
     
     buf[0] = '0';
@@ -502,7 +491,7 @@ void hal_debug_hex(uint32_t value)
     }
     buf[10] = '\0';
     
-    uart_puts(UART_0, buf);
+    hal_debug_print(buf);
 }
 
 /**
@@ -520,15 +509,9 @@ void hal_debug_print(const char *str)
  */
 void hal_debug_variable(const char *str, uint32_t value)
 {
-    uart_puts(UART_0, str);
+    hal_debug_print(str);
     hal_debug_hex(value);
-    uart_puts(UART_0, "\n");
-}
-
-void restore_data(void)
-{
-    extern char _data_start, _data_end, _copy_start;
-    memcpy (&_data_start, &_copy_start, &_data_end - &_data_start);
+    hal_debug_print("\n");
 }
 
 void hal_restart(void)
@@ -553,8 +536,6 @@ void hal_restart(void)
     /* Memory barrier */
     __asm__ volatile("dsync");
     __asm__ volatile("isync");
-
-    restore_data();
 
     extern void _start(void);
 

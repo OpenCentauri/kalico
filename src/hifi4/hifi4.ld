@@ -3,12 +3,18 @@ ENTRY(_ResetVector)
 MEMORY
 {
     iram0 (rx)  : ORIGIN = 0x00400000, LENGTH = 0x00010000
+    dram0 (rw)  : ORIGIN = 0x00420000, LENGTH = 0x00008000
+    dram1 (rw)  : ORIGIN = 0x00440000, LENGTH = 0x00008000
     ddr1  (rwx) : ORIGIN = 0x32000000, LENGTH = 0x00100000
+    sram  (rw)  : ORIGIN = 0x00020000, LENGTH = 0x00008000
 }
 
 PHDRS
 {
     iram0_phdr PT_LOAD;
+    rodata_phdr PT_LOAD;
+    dram0_phdr PT_LOAD;
+    dram1_phdr PT_LOAD;
     ddr1_phdr  PT_LOAD;
 }
 
@@ -17,12 +23,6 @@ PROVIDE(_memmap_vecbase_reset = 0x00401000);
 
 SECTIONS
 {
-    /* OEM header section at start of IRAM */
-    .oemhead.text 0x00400000 : ALIGN(4) {
-        _oemhead_text_start = ABSOLUTE(.);
-        KEEP(*(.oemhead.text))
-    } > iram0 :iram0_phdr
-
     .resource_table : ALIGN(4) {
         KEEP(*(.resource_table))
     } > iram0 :iram0_phdr
@@ -79,20 +79,25 @@ SECTIONS
         KEEP(*(.DoubleExceptionVector.text))
     } > iram0 :iram0_phdr
     
-    .text : ALIGN(4) {
+    .text 0x00404000 : ALIGN(4) {
         *(.literal .literal.* .text .text.*)
         *(.stub)
         *(.gnu.linkonce.literal.* .gnu.linkonce.t.*)
         *(.fini.literal)
         *(.fini)
         *(.gnu.version)
-    } > ddr1 :ddr1_phdr
+    } > iram0 :iram0_phdr
     
     .rodata : ALIGN(4) {
+        _rodata_start = ABSOLUTE(.);
         *(.rodata .rodata.*)
         *(.gnu.linkonce.r.*)
         *(.rodata1)
-    } > ddr1 :ddr1_phdr
+        . = ALIGN(4);
+        _rodata_end = ABSOLUTE(.);
+    } > dram0 AT > iram0 :rodata_phdr
+
+    _rodata_lma = LOADADDR(.rodata);
     
     .data : ALIGN(4) {
         _data_start = ABSOLUTE(.);
@@ -103,13 +108,9 @@ SECTIONS
         *(.gnu.linkonce.s.*)
         . = ALIGN(4);
         _data_end = ABSOLUTE(.);
-    } > ddr1 :ddr1_phdr
+    } > dram0 AT > iram0 :rodata_phdr
 
-    .copy (NOLOAD) : ALIGN(4) {
-        _copy_start = ABSOLUTE(.);
-        . += (_data_end - _data_start);
-        _data_backup_end = ABSOLUTE(.);
-    } > ddr1 :NONE
+    _data_lma = LOADADDR(.data);
     
     .bss (NOLOAD) : ALIGN(4) {
         _bss_start = ABSOLUTE(.);
@@ -121,20 +122,20 @@ SECTIONS
         *(COMMON)
         . = ALIGN(4);
         _bss_end = ABSOLUTE(.);
-    } > ddr1 :NONE
+    } > dram0 :NONE
     
     /* Heap section - place after BSS */
     .heap (NOLOAD) : ALIGN(8) {
         _heap_start = ABSOLUTE(.);
-        . = . + 0x10000;  /* 64KB heap */
+        . = . + 0x2000;  /* 8KB heap */
         _heap_end = ABSOLUTE(.);
-    } > ddr1 :NONE
+    } > dram1 :NONE
 
     /* Reserve space for stack at end of DDR - MOVED AFTER HEAP */
     .stack (NOLOAD) : ALIGN(16) {
-        . = . + 0x8000;  /* 32KB stack */
+        . = . + 0x1000;  /* 4 KB stack */
         _stack_end = ABSOLUTE(.);
-    } > ddr1 :NONE
+    } > dram1 :NONE
     
     /* Update stack pointer to point to END of stack section */
     PROVIDE(__stack = _stack_end);

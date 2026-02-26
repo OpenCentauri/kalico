@@ -30,6 +30,34 @@ _start:
     
     /* Initialize stack pointer */
     movi    a1, __stack
+
+    /* Copy .rodata from IRAM (LMA) to DRAM0 (VMA) using word reads.
+     * IRAM only supports 32-bit aligned access, so we MUST use s32i/l32i. */
+    movi    a2, _rodata_lma      /* source: IRAM load address */
+    movi    a3, _rodata_start    /* dest: DRAM0 runtime address */
+    movi    a4, _rodata_end      /* end of dest */
+.Lrodata_copy:
+    bgeu    a3, a4, .Lrodata_done
+    l32i    a5, a2, 0            /* word read from IRAM (safe) */
+    s32i    a5, a3, 0            /* word write to DRAM0 */
+    addi    a2, a2, 4
+    addi    a3, a3, 4
+    j       .Lrodata_copy
+.Lrodata_done:
+
+    /* Copy .data from IRAM (LMA) to DRAM0 (VMA) using word reads.
+     * IRAM only supports 32-bit aligned access, so we MUST use s32i/l32i. */
+    movi    a2, _data_lma      /* source: IRAM load address */
+    movi    a3, _data_start    /* dest: DRAM0 runtime address */
+    movi    a4, _data_end      /* end of dest */
+.Ldata_copy:
+    bgeu    a3, a4, .Ldata_done
+    l32i    a5, a2, 0            /* word read from IRAM (safe) */
+    s32i    a5, a3, 0            /* word write to DRAM0 */
+    addi    a2, a2, 4
+    addi    a3, a3, 4
+    j       .Ldata_copy
+.Ldata_done:
     
     /* Clear BSS section BEFORE calling main */
     movi    a2, _bss_start
