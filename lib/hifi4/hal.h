@@ -161,9 +161,9 @@
 #define CCU_HSTIMER_RST     BIT(16)
 
 /* DSP CLK bits */
-#define CCU_DSP_CLK_SRC_MASK        0x07
+#define CCU_DSP_CLK_SRC_MASK        (0x07 << 24)
 #define CCU_DSP_CLK_SRC(m)          ((m) << 24)  /* Factor M (0-4: /(M+1)) */
-#define CCU_DSP_CLK_FACTOR_M_MASK   0x1F
+#define CCU_DSP_CLK_FACTOR_M_MASK   (0x1F << 24)
 #define CCU_DSP_CLK_FACTOR_M(m)     ((m) << 0)  /* Factor M (0-4: /(M+1)) */
 
 /* DSP clock sources */
