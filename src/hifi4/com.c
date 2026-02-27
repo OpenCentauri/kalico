@@ -74,6 +74,9 @@ rpmsg_consume_task(void)
         rpos = needcopy;
     }
     receive_pos = rpos;
+
+    if (rpos)
+        sched_wake_task(&rpmsg_consume_wake);
 }
 DECL_TASK(rpmsg_consume_task);
 

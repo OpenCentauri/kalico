@@ -463,7 +463,7 @@ void hal_init(void)
     REG32(DSP_INTC_BASE + DSP_INTC_PEND2) = 0xFFFFFFFF;
 
     // cache_enable_ddr();
-    watchdog_stop();
+    // watchdog_stop();
 
     /* Enable global interrupts */
     irq_global_enable();
@@ -518,6 +518,9 @@ void hal_restart(void)
 {
     /* Disable all interrupts */
     irq_global_disable();
+
+    /* Stop the watchdog */
+    watchdog_stop();
     
     /* Clear INTENABLE to prevent any interrupt from firing */
     __asm__ volatile("wsr.intenable %0" :: "a"(0));
@@ -527,15 +530,15 @@ void hal_restart(void)
     /* Needed if called from an interrupt handler */
     __asm__ volatile("wsr.ps %0; rsync" :: "a"(0));
     
-    /* Flush data cache to ensure memory is consistent */
-    dcache_writeback_all();
+    // /* Flush data cache to ensure memory is consistent */
+    // dcache_invalidate_all();
     
-    /* Invalidate instruction cache so we fetch fresh code */
-    icache_invalidate_all();
+    // /* Invalidate instruction cache so we fetch fresh code */
+    // icache_invalidate_all();
     
-    /* Memory barrier */
-    __asm__ volatile("dsync");
-    __asm__ volatile("isync");
+    // /* Memory barrier */
+    // __asm__ volatile("dsync");
+    // __asm__ volatile("isync");
 
     extern void _start(void);
 
