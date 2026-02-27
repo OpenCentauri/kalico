@@ -105,17 +105,8 @@ rpmsg_transport_init(void)
     msgbox_recv_blocking(MSGBOX_RPMSG_RX_CHANNEL);
     lprintf("rpmsg: Linux is ready\n");
 
-    // Now set up the MSGBOX interrupt handler
-    msgbox_set_rx_callback(MSGBOX_RPMSG_RX_CHANNEL,
-                           rpmsg_msgbox_rx_callback, NULL);
-    msgbox_enable_rx_irq(MSGBOX_RPMSG_RX_CHANNEL);
-
-    // Create an endpoint and announce it to Linux.
-    // After this, Linux will create /dev/rpmsg0 (if rpmsg_char is loaded)
-    // or bind an rpmsg driver that matches the name.
-    klipper_ept = rpmsg_create_ept("rpmsg-tty",       // name
-                                    1024,             // local addr
-                                    klipper_rpmsg_cb);// callback
+    // Create the endpoint BEFORE enabling IRQs
+    klipper_ept = rpmsg_create_ept("rpmsg-tty", 1024, klipper_rpmsg_cb);
     if (!klipper_ept) {
         lprintf("rpmsg: failed to create endpoint\n");
         return;
@@ -124,10 +115,15 @@ rpmsg_transport_init(void)
     // Give com.c access to the endpoint for TX
     com_set_endpoint(klipper_ept);
 
-    lprintf("rpmsg: transport ready\n");
-
-    // Flush any pending NS announcements — the initial kick from Linux
-    // may have arrived before we created the endpoint.
+    // Send the initial NS announcement and process any pending messages.
+    // Do this BEFORE enabling the MSGBOX IRQ so there's no race.
     rpmsg_process();
+
+    // NOW enable the interrupt handler — pending_announcements is already 0
+    msgbox_set_rx_callback(MSGBOX_RPMSG_RX_CHANNEL,
+                           rpmsg_msgbox_rx_callback, NULL);
+    msgbox_enable_rx_irq(MSGBOX_RPMSG_RX_CHANNEL);
+
+    lprintf("rpmsg: transport ready\n");
 }
 DECL_INIT(rpmsg_transport_init);
