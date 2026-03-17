@@ -1921,7 +1921,7 @@ gcode:
 #   Default is 0.
 #description: Update the duration of a delayed_gcode
 #   This will add a short description used at the HELP command or while
-#   using the auto completion feature. Default "Update the duration of 
+#   using the auto completion feature. Default "Update the duration of
 #   a delayed_gcode"
 ```
 
@@ -2508,7 +2508,7 @@ z_offset:
 #   printers that have an outlier first sample.
 #⚠️ bad_probe_strategy: RETRY
 #   Strategy to apply when a probe attempt is considered "bad" based on
-#   the probe's quality detection logic. If the probe doesnt support 
+#   the probe's quality detection logic. If the probe doesnt support
 #   quality detection all probes are assumed to be good.
 #   One of: fail, ignore, retry or circle.
 #   - fail: Stop immediately with an error on first bad probe.
@@ -2540,7 +2540,7 @@ z_offset:
 
 ### [nozzle_cleanup]
 
-Enables the [NOZZLE_CLEANUP](G-Codes.md#nozzle_cleanup) gcode command. This 
+Enables the [NOZZLE_CLEANUP](G-Codes.md#nozzle_cleanup) gcode command. This
 performs a nozzle cleaning routine that probes over a grid pattern to
 remove ooze from the nozzle. To work correctly your probe needs to support probe
 quality detection, such as the [load_cell_probe](#load_cell_probe).
@@ -5861,6 +5861,9 @@ sensor_pin:
 ### [load_cell]
 Load Cell. Uses an ADC sensor attached to a load cell to create a digital
 scale.
+
+The `sensor_type` selects the underlying sensor implementation. See the
+chip-specific sections below for the sensor configuration parameters.
 ```
 [load_cell]
 sensor_type:
@@ -5877,12 +5880,20 @@ sensor_type:
 #   decreasing force value when placed under load.
 ```
 
+### [hx71x]
+Named HX71x sensor section. Supports both HX711 and HX717 chips.
+
+The default sensor name is `hx71x`, but one may specify an explicit name
+(eg, `[hx71x sg0]`). Explicit names are primarily useful when another
+configuration references the sensor by name, such as `load_cell_fusion`.
+Use `chip` to select the device variant.
+
 #### HX711
 This is a 24 bit low sample rate chip using "bit-bang" communications. It is
 suitable for filament scales.
 ```
-[load_cell]
-sensor_type: hx711
+[hx71x]
+chip: hx711
 sclk_pin:
 #   The pin connected to the HX711 clock line. This parameter must be provided.
 dout_pin:
@@ -5902,8 +5913,8 @@ dout_pin:
 #### HX717
 This is the 4x higher sample rate version of the HX711, suitable for probing.
 ```
-[load_cell]
-sensor_type: hx717
+[hx71x]
+chip: hx717
 sclk_pin:
 #   The pin connected to the HX717 clock line. This parameter must be provided.
 dout_pin:
@@ -5920,12 +5931,17 @@ dout_pin:
 #   in software.
 ```
 
-#### ADS1220
+### [ads1220]
+Named ADS1220 sensor section.
+
+The default sensor name is `ads1220`, but one may specify an explicit name
+(eg, `[ads1220 sg0]`). Explicit names are primarily useful when another
+configuration references the sensor by name, such as `load_cell_fusion`.
+
 The ADS1220 is a 24 bit ADC supporting up to a 2Khz sample rate configurable in
 software.
 ```
-[load_cell]
-sensor_type: ads1220
+[ads1220]
 cs_pin:
 #   The pin connected to the ADS1220 chip select line. This parameter must
 #   be provided.
@@ -5969,6 +5985,19 @@ data_ready_pin:
 #vref:
 #   The selected voltage reference. Valid values are: 'internal', 'REF0', 'REF1'
 #   and 'analog_supply'. Default is 'internal'.
+```
+
+### Load Cell Fusion
+Combine multiple named sensor sections into one logical load cell. The fused
+output uses the latest sample from each sensor and reports at the aggregate
+sample rate.
+```
+[load_cell]
+sensor_type: load_cell_fusion
+sensors:
+#   A comma separated list of named sensor sections, using the full section
+#   name (e.g. `hx71x sg0`). Prefix an entry with `!` to invert that
+#   sensor's contribution. Example: sensors: hx71x sg0, !hx71x sg1
 ```
 
 ### [load_cell_probe]

@@ -199,6 +199,22 @@ class ADS1220(LoadCellSensor):
     def attach_load_cell_probe(self, load_cell_probe_oid: int):
         self.attach_probe_cmd.send([self.oid, load_cell_probe_oid])
 
+    def build_attach_fusion_cmd(self, fusion_oid: int, invert: bool) -> str:
+        return (
+            "ads1220_attach_fusion oid=%d fusion_oid=%d invert=%d"
+            % (self.oid, fusion_oid, int(invert))
+        )
+
+    def prepare_sampling(self):
+        self.reset_chip()
+        self.setup_chip()
+
+    def start_sampling(self, rest_ticks: int):
+        self.query_ads1220_cmd.send([self.oid, rest_ticks])
+
+    def stop_sampling(self):
+        self.query_ads1220_cmd.send_wait_ack([self.oid, 0])
+
     # Measurement decoding
     def _convert_samples(self, samples):
         adc_factor = 1.0 / (1 << 23)
@@ -213,10 +229,9 @@ class ADS1220(LoadCellSensor):
         self.last_error_count = 0
         self.consecutive_fails = 0
         # Start bulk reading
-        self.reset_chip()
-        self.setup_chip()
+        self.prepare_sampling()
         rest_ticks = self.mcu.seconds_to_clock(1.0 / (10.0 * self.sps))
-        self.query_ads1220_cmd.send([self.oid, rest_ticks])
+        self.start_sampling(rest_ticks)
         logging.info("ADS1220 starting '%s' measurements", self.name)
         # Initialize clock tracking
         self.ffreader.note_start()
@@ -226,7 +241,7 @@ class ADS1220(LoadCellSensor):
         if self.printer.is_shutdown():
             return
         # Halt bulk reading
-        self.query_ads1220_cmd.send_wait_ack([self.oid, 0])
+        self.stop_sampling()
         self.ffreader.note_end()
         logging.info("ADS1220 finished '%s' measurements", self.name)
 

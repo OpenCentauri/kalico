@@ -154,6 +154,56 @@ drift_filter_cutoff_frequency: 0.5
 z_offset: 0.0
 ```
 
+For fused probes using multiple named sensors, configure the sensors separately
+and reference them from the [`sensor_type: load_cell_fusion`](Config_Reference.md#load-cell-fusion)
+section:
+
+```ini
+[hx71x sg0]
+chip: hx711
+dout_pin: strain_gauge_mcu:PB14
+sclk_pin: strain_gauge_mcu:PB13
+sample_rate: 80
+gain: A-128
+
+[hx71x sg1]
+chip: hx711
+dout_pin: strain_gauge_mcu:PC8
+sclk_pin: strain_gauge_mcu:PC7
+sample_rate: 80
+gain: A-128
+
+[hx71x sg2]
+chip: hx711
+dout_pin: strain_gauge_mcu:PB15
+sclk_pin: strain_gauge_mcu:PC6
+sample_rate: 80
+gain: A-128
+
+[hx71x sg3]
+chip: hx711
+dout_pin: strain_gauge_mcu:PA8
+sclk_pin: strain_gauge_mcu:PC9
+sample_rate: 80
+gain: A-128
+
+[load_cell_probe]
+sensor_type: load_cell_fusion
+sensors: hx71x sg0, hx71x sg1, hx71x sg2, hx71x sg3
+
+# load cell settings
+counts_per_gram: 245
+reference_tare_counts: 12345
+
+# load cell probe settings
+trigger_force: 75
+force_safety_limit: 5000
+drift_filter_cutoff_frequency: 0.5
+
+# probe settings
+z_offset: 0.0
+```
+
 - `counts_per_gram: 245`\
   _Default Value: None_\
   Conversion factor from raw sensor counts to grams, calculated by `LOAD_CELL_CALIBRATE`. All probing force limits depend on this value being accurate.
@@ -296,7 +346,7 @@ Load cell probes support a filter on the MCU that compensates for drift from ext
 
 #### Installing SciPy
 
-The filter is off by default. The [SciPy](https://scipy.org/) library is required to compute the filter coefficients from configuration values. It needs to be installed in the klipper virtual environment. Usually: 
+The filter is off by default. The [SciPy](https://scipy.org/) library is required to compute the filter coefficients from configuration values. It needs to be installed in the klipper virtual environment. Usually:
 
 ```bash
 ~/klippy-env/bin/pip install scipy
@@ -316,7 +366,7 @@ Basic tuning guidelines:
 - Keep `trigger_force` low (default 75 g); the drift filter maintains internal readings near zero
 - Keep `force_safety_limit` conservative (default 5 kg) during tuning
 
-Tuning of the other filter parameters is beyond the scope of this documentation. 
+Tuning of the other filter parameters is beyond the scope of this documentation.
 A Jupyter notebook is provided in [scripts/filter_workbench.ipynb](../scripts/filter_workbench.ipynb) with an example of a detailed analysis.
 
 ## Developer Notes

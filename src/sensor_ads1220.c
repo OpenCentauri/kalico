@@ -12,6 +12,7 @@
 #include "sched.h" // sched_add_timer
 #include "sensor_bulk.h" // sensor_bulk_report
 #include "load_cell_probe.h" // load_cell_probe_report_sample
+#include "load_cell_fusion.h" // load_cell_fusion_report_sample
 #include "spicmds.h" // spidev_transfer
 #include <stdint.h>
 
@@ -23,6 +24,7 @@ struct ads1220_adc {
     uint8_t pending_flag;
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
+    struct load_cell_fusion_sensor *fusion_sensor;
 };
 
 #define BYTES_PER_SAMPLE 4
@@ -91,6 +93,11 @@ ads1220_read_adc(struct ads1220_adc *ads1220, uint8_t oid)
     if (counts & 0x800000)
         counts |= 0xFF000000;
 
+    if (ads1220->fusion_sensor) {
+        load_cell_fusion_report_sample(ads1220->fusion_sensor, counts, 0);
+        return;
+    }
+
     // endstop is optional, report if enabled and no errors
     if (ads1220->lce) {
         load_cell_probe_report_sample(ads1220->lce, counts);
@@ -121,6 +128,16 @@ ads1220_attach_load_cell_probe(uint32_t *args) {
 }
 DECL_COMMAND(ads1220_attach_load_cell_probe,
     "ads1220_attach_load_cell_probe oid=%c load_cell_probe_oid=%c");
+
+void
+ads1220_attach_fusion(uint32_t *args)
+{
+    struct ads1220_adc *ads1220 = oid_lookup(args[0], command_config_ads1220);
+    struct load_cell_fusion *lcf = load_cell_fusion_oid_lookup(args[1]);
+    ads1220->fusion_sensor = load_cell_fusion_add_sensor(lcf, args[2]);
+}
+DECL_COMMAND(ads1220_attach_fusion,
+             "ads1220_attach_fusion oid=%c fusion_oid=%c invert=%c");
 
 // start/stop capturing ADC data
 void
@@ -170,5 +187,6 @@ ads1220_capture_task(void)
         if (ads1220->pending_flag)
             ads1220_read_adc(ads1220, oid);
     }
+    load_cell_fusion_process_updates();
 }
 DECL_TASK(ads1220_capture_task);

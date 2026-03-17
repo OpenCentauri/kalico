@@ -114,6 +114,21 @@ class HX71xBase(LoadCellSensor):
     def attach_load_cell_probe(self, load_cell_probe_oid: int):
         self.attach_probe_cmd.send([self.oid, load_cell_probe_oid])
 
+    def build_attach_fusion_cmd(self, fusion_oid: int, invert: bool) -> str:
+        return (
+            "hx71x_attach_fusion oid=%d fusion_oid=%d invert=%d"
+            % (self.oid, fusion_oid, int(invert))
+        )
+
+    def prepare_sampling(self):
+        pass
+
+    def start_sampling(self, rest_ticks: int):
+        self.query_hx71x_cmd.send([self.oid, rest_ticks])
+
+    def stop_sampling(self):
+        self.query_hx71x_cmd.send_wait_ack([self.oid, 0])
+
     # Measurement decoding
     def _convert_samples(self, samples):
         adc_factor = 1.0 / (1 << 23)
@@ -132,7 +147,7 @@ class HX71xBase(LoadCellSensor):
         self.last_error_count = 0
         # Start bulk reading
         rest_ticks = self.mcu.seconds_to_clock(1.0 / (10.0 * self.sps))
-        self.query_hx71x_cmd.send([self.oid, rest_ticks])
+        self.start_sampling(rest_ticks)
         logging.info(
             "%s starting '%s' measurements", self.sensor_type, self.name
         )
@@ -144,7 +159,7 @@ class HX71xBase(LoadCellSensor):
         if self.printer.is_shutdown():
             return
         # Halt bulk reading
-        self.query_hx71x_cmd.send_wait_ack([self.oid, 0])
+        self.stop_sampling()
         self.ffreader.note_end()
         logging.info(
             "%s finished '%s' measurements", self.sensor_type, self.name
