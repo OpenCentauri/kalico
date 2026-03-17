@@ -13,6 +13,7 @@
 #include "sched.h" // sched_add_timer
 #include "sensor_bulk.h" // sensor_bulk_report
 #include "load_cell_probe.h" // load_cell_probe_report_sample
+#include "load_cell_fusion.h" // load_cell_fusion_report_sample
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -26,6 +27,7 @@ struct hx71x_adc {
     struct gpio_out sclk; // pin used to generate clock for the hx71x
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
+    struct load_cell_fusion_sensor *fusion_sensor;
 };
 
 enum {
@@ -177,6 +179,12 @@ hx71x_read_adc(struct hx71x_adc *hx71x, uint8_t oid)
         counts = hx71x->last_error;
     }
 
+    if (hx71x->fusion_sensor) {
+        load_cell_fusion_report_sample(hx71x->fusion_sensor, counts,
+                                       hx71x->last_error != 0);
+        return;
+    }
+
     // probe is optional, report if enabled
     if (hx71x->last_error == 0 && hx71x->lce) {
         load_cell_probe_report_sample(hx71x->lce, counts);
@@ -253,6 +261,16 @@ command_query_hx71x_status(const uint32_t *args)
 }
 DECL_COMMAND(command_query_hx71x_status, "query_hx71x_status oid=%c");
 
+void
+hx71x_attach_fusion(uint32_t *args)
+{
+    struct hx71x_adc *hx71x = oid_lookup(args[0], command_config_hx71x);
+    struct load_cell_fusion *lcf = load_cell_fusion_oid_lookup(args[1]);
+    hx71x->fusion_sensor = load_cell_fusion_add_sensor(lcf, args[2]);
+}
+DECL_COMMAND(hx71x_attach_fusion,
+             "hx71x_attach_fusion oid=%c fusion_oid=%c invert=%c");
+
 // Background task that performs measurements
 void
 hx71x_capture_task(void)
@@ -265,5 +283,6 @@ hx71x_capture_task(void)
         if (hx71x->flags)
             hx71x_read_adc(hx71x, oid);
     }
+    load_cell_fusion_process_updates();
 }
 DECL_TASK(hx71x_capture_task);
