@@ -28,3 +28,5 @@ src-$(CONFIG_WANT_ADS1220) += sensor_ads1220.c
 src-$(CONFIG_WANT_SENSOR_ANGLE) += sensor_angle.c
 src-$(CONFIG_NEED_SENSOR_BULK) += sensor_bulk.c
 src-$(CONFIG_WANT_HX711S) += sensor_hx711s.c
+src-$(CONFIG_NEED_SOS_FILTER) += sos_filter.c
+src-$(CONFIG_NEED_LOAD_CELL_PROBE) += load_cell_probe.c
