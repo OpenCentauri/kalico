@@ -98,32 +98,49 @@ rpmsg_transport_init(void)
     // Initialize the RPMsg virtio layer
     rpmsg_init(VRING_TX_ADDR, VRING_RX_ADDR, RPMSG_NUM_BUFS);
 
-    // Wait for Linux to finish virtio setup.
-    // Linux populates the TX vring (vring0) with empty buffers when
-    // virtio_rpmsg_bus probes. Until that happens, avail->idx == 0.
-    lprintf("rpmsg: waiting for Linux...\n");
-    msgbox_recv_blocking(MSGBOX_RPMSG_RX_CHANNEL);
-    lprintf("rpmsg: Linux is ready\n");
+    // Check if Linux already has the vrings populated.
+    // On cold boot, tx_vring.avail->idx == 0 (no buffers yet).
+    // After a soft reset, it's > 0 because Linux never tore down.
+    int cold_boot = rpmsg_tx_avail_idx() == 0;
+
+    if (cold_boot) {
+        // Wait for Linux to finish virtio setup.
+        // Linux populates the TX vring (vring0) with empty buffers when
+        // virtio_rpmsg_bus probes. Until that happens, avail->idx == 0.
+        hal_debug_print("rpmsg: waiting for Linux...\n");
+        msgbox_recv_blocking(MSGBOX_RPMSG_RX_CHANNEL);
+        hal_debug_print("rpmsg: Linux is ready\n");
+    } else {
+        hal_debug_print("rpmsg: warm restart, syncing with Linux\n");
+        rpmsg_sync_indices();
+    }
 
     // Create the endpoint BEFORE enabling IRQs
     klipper_ept = rpmsg_create_ept("rpmsg-tty", 1024, klipper_rpmsg_cb);
     if (!klipper_ept) {
-        lprintf("rpmsg: failed to create endpoint\n");
+        hal_debug_print("rpmsg: failed to create endpoint\n");
         return;
     }
 
     // Give com.c access to the endpoint for TX
     com_set_endpoint(klipper_ept);
 
-    // Send the initial NS announcement and process any pending messages.
-    // Do this BEFORE enabling the MSGBOX IRQ so there's no race.
-    rpmsg_process();
+    if (cold_boot) {
+        // Send the initial NS announcement and process any pending messages.
+        // Do this BEFORE enabling the MSGBOX IRQ so there's no race.
+        rpmsg_process();
+    } else {
+        // Warm restart — set dst directly, Linux already knows us
+        klipper_ept->dst = 0x400;  // The address Linux assigned
+        // Suppress NS announcement
+        rpmsg_clear_pending_announcements();
+    }
 
     // NOW enable the interrupt handler — pending_announcements is already 0
     msgbox_set_rx_callback(MSGBOX_RPMSG_RX_CHANNEL,
                            rpmsg_msgbox_rx_callback, NULL);
     msgbox_enable_rx_irq(MSGBOX_RPMSG_RX_CHANNEL);
 
-    lprintf("rpmsg: transport ready\n");
+    hal_debug_print("rpmsg: transport ready\n");
 }
 DECL_INIT(rpmsg_transport_init);

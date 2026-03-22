@@ -207,13 +207,6 @@ struct rpmsg_endpoint *rpmsg_create_ept(const char *name, uint32_t addr,
 int rpmsg_send(struct rpmsg_endpoint *ept, uint32_t dst,
                const void *data, uint32_t len)
 {
-    static int send_count = 0;
-    if (send_count < 5) {
-        lprintf("rpmsg: send #%d src=%lu dst=%lu len=%lu\n",
-                send_count, (unsigned long)ept->addr,
-                (unsigned long)dst, (unsigned long)len);
-        send_count++;
-    }
 
     if (!rpmsg_ready)
         return -1;
@@ -330,4 +323,24 @@ int rpmsg_process(void)
         rpmsg_kick(1);
 
     return processed;
+}
+
+uint16_t rpmsg_tx_avail_idx(void)
+{
+    mb();
+    return tx_vring.avail->idx;
+}
+
+void rpmsg_sync_indices(void)
+{
+    // Match Linux's current position — consume nothing,
+    // just sync to where Linux is now
+    mb();
+    rx_last_avail_idx = rx_vring.avail->idx;
+    tx_last_avail_idx = tx_vring.used->idx;
+}
+
+void rpmsg_clear_pending_announcements(void)
+{
+    pending_announcements = 0;
 }
