@@ -154,4 +154,41 @@ int rpmsg_process(void);
  */
 extern void rpmsg_kick(uint32_t vq_id);
 
+/*
+ * Get the current TX vring available index.
+ *
+ * Returns the avail->idx value from the TX vring, which indicates
+ * how many empty buffers Linux has posted. Useful for detecting
+ * whether the virtio transport has been initialized by the host
+ * (returns 0 on a fresh cold boot before Linux populates buffers).
+ *
+ * Returns: current TX vring avail->idx value
+ */
+uint16_t rpmsg_tx_avail_idx(void);
+
+/*
+ * Resynchronize vring tracking indices after a warm restart.
+ *
+ * After a soft reset, the shared vring memory in DDR is still valid
+ * but the DSP's local tracking indices were lost. This function
+ * restores them from the vring state so the DSP stays in sync
+ * with Linux:
+ *   - RX: advances to avail->idx (skips any stale messages)
+ *   - TX: resets to used->idx (reclaims recycled empty buffers)
+ *
+ * Call this once during warm restart init, before enabling the
+ * MSGBOX interrupt handler.
+ */
+void rpmsg_sync_indices(void);
+
+/*
+ * Suppress any pending name service announcements.
+ *
+ * During a warm restart the rpmsg channel is already established
+ * on the Linux side, so re-announcing endpoints is unnecessary
+ * and would cause "channel already exists" errors. Call this
+ * after recreating endpoints on the warm restart path.
+ */
+void rpmsg_clear_pending_announcements(void);
+
 #endif // __HIFI4_RPMSG_H
