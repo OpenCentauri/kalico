@@ -91,7 +91,6 @@ def load_config(config):
     DANGER_OPTIONS = DangerOptions(config)
     # Apply transmit_extra to all ClockSync instances already registered
     printer = config.get_printer()
-    reactor = printer.get_reactor()
     # Wire transmit_extra into MCU clocksync objects at connect time
     printer.register_event_handler(
         "klippy:mcu_identify",
