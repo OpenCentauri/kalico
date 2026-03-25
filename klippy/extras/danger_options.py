@@ -44,7 +44,8 @@ class DangerOptions:
         # transmit_extra: forward-scheduling headroom (seconds) added to the
         # MCU clock estimate passed to the serialqueue.  Increasing this helps
         # prevent 'Timer too close' MCU shutdowns on hosts that experience CPU
-        # or scheduling jitter.  See docs/Danger_Options.md for guidance.
+        # or scheduling jitter.  See docs/Config_Reference.md ([danger_options])
+        # for guidance.
         self.transmit_extra = config.getfloat(
             "transmit_extra", TRANSMIT_EXTRA, minval=0.0, maxval=0.010
         )
