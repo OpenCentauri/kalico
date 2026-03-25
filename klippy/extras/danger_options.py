@@ -1,3 +1,6 @@
+from ..clocksync import TRANSMIT_EXTRA
+
+
 class DangerOptions:
     def __init__(self, config):
         self.minimal_logging = config.getboolean("minimal_logging", False)
@@ -37,6 +40,14 @@ class DangerOptions:
         )
         self.homing_elapsed_distance_tolerance = config.getfloat(
             "homing_elapsed_distance_tolerance", 0.5, minval=0.0
+        )
+        # transmit_extra: forward-scheduling headroom (seconds) added to the
+        # MCU clock estimate passed to the serialqueue.  Increasing this helps
+        # prevent 'Timer too close' MCU shutdowns on hosts that experience CPU
+        # or scheduling jitter.  See docs/Config_Reference.md ([danger_options])
+        # for guidance.
+        self.transmit_extra = config.getfloat(
+            "transmit_extra", TRANSMIT_EXTRA, minval=0.0, maxval=0.010
         )
 
         temp_ignore_limits = False
@@ -78,4 +89,20 @@ def get_danger_options():
 def load_config(config):
     global DANGER_OPTIONS
     DANGER_OPTIONS = DangerOptions(config)
+    # Apply transmit_extra to all ClockSync instances already registered
+    printer = config.get_printer()
+    # Wire transmit_extra into MCU clocksync objects at connect time
+    printer.register_event_handler(
+        "klippy:mcu_identify",
+        lambda: _apply_transmit_extra(printer, DANGER_OPTIONS.transmit_extra),
+    )
     return DANGER_OPTIONS
+
+
+def _apply_transmit_extra(printer, value):
+    """Push transmit_extra into all MCU clocksync objects."""
+    for name, obj in printer.objects.items():
+        if name == "mcu" or name.startswith("mcu "):
+            clocksync = getattr(obj, "_clocksync", None)
+            if clocksync is not None and hasattr(clocksync, "set_transmit_extra"):
+                clocksync.set_transmit_extra(value)

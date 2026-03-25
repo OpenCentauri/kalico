@@ -9,7 +9,11 @@ import traceback
 
 RTT_AGE = 0.000010 / (60.0 * 60.0)
 DECAY = 1.0 / 30.0
-TRANSMIT_EXTRA = 0.001
+# Default forward-scheduling headroom added to the clock estimate sent
+# to the serialqueue.  Can be overridden via [danger_options]
+# transmit_extra.  Increase this (e.g. to 0.003-0.005) if you
+# experience 'Timer too close' shutdowns on a heavily loaded host.
+TRANSMIT_EXTRA = 0.002
 
 
 class ClockSync:
@@ -30,6 +34,11 @@ class ClockSync:
         self.clock_avg = self.clock_covariance = 0.0
         self.prediction_variance = 0.0
         self.last_prediction_time = 0.0
+        self.transmit_extra = TRANSMIT_EXTRA
+
+    def set_transmit_extra(self, value):
+        """Override the transmit_extra headroom (called from danger_options)."""
+        self.transmit_extra = value
 
     def disconnect(self):
         self.reactor.update_timer(self.get_clock_timer, self.reactor.NEVER)
@@ -145,7 +154,7 @@ class ClockSync:
         pred_stddev = math.sqrt(self.prediction_variance)
         self.serial.set_clock_est(
             new_freq,
-            self.time_avg + TRANSMIT_EXTRA,
+            self.time_avg + self.transmit_extra,
             int(self.clock_avg - 3.0 * pred_stddev),
             clock,
         )
@@ -192,7 +201,7 @@ class ClockSync:
             "clocksync state: mcu_freq=%d last_clock=%d"
             " clock_est=(%.3f %d %.3f) min_half_rtt=%.6f min_rtt_time=%.3f"
             " time_avg=%.3f(%.3f) clock_avg=%.3f(%.3f)"
-            " pred_variance=%.3f"
+            " pred_variance=%.3f transmit_extra=%.6f"
             % (
                 self.mcu_freq,
                 self.last_clock,
@@ -206,6 +215,7 @@ class ClockSync:
                 self.clock_avg,
                 self.clock_covariance,
                 self.prediction_variance,
+                self.transmit_extra,
             )
         )
 
