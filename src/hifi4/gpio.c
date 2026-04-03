@@ -6,6 +6,7 @@
 
 #include "gpio.h" // gpio_out_write
 #include "generic/misc.h"
+#include "board/irq.h" // irq_save
 #include "command.h"
 #include "sched.h" // sched_shutdown
 
@@ -35,7 +36,9 @@ void gpio_out_toggle_noirq(struct gpio_out g) {
     gpio_toggle(g.pin);
 }
 void gpio_out_toggle(struct gpio_out g) {
+    irqstatus_t flag = irq_save();
     gpio_out_toggle_noirq(g);
+    irq_restore(flag);
 }
 void gpio_out_write(struct gpio_out g, uint8_t val) {
     gpio_write(g.pin, val);
