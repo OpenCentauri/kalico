@@ -43,7 +43,7 @@ setjmp:
 	.type	longjmp, @function
 longjmp:
 	/* Exit EXCM mode if called from an interrupt */
-    wsr.ps	a12
+    rsr.ps	a12
     movi    a13, ~(1 << 4)
     and		a12, a12, a13
     wsr.ps	a12
