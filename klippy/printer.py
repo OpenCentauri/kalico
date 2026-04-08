@@ -666,6 +666,7 @@ def main():
         logging.getLogger().setLevel(debuglevel)
     logging.info("=======================")
     logging.info("Starting Klippy...")
+    util.lock_memory()
     git_info = util.get_git_version()
     git_vers = git_info["version"]
 

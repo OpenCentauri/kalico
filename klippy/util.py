@@ -3,6 +3,8 @@
 # Copyright (C) 2016-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import ctypes
+import ctypes.util
 import fcntl
 import json
 import logging
@@ -25,6 +27,24 @@ def fix_sigint():
 
 
 fix_sigint()
+
+
+# Lock all current and future memory pages into RAM to prevent swapping
+def lock_memory():
+    MCL_CURRENT = 1
+    MCL_FUTURE = 2
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        result = libc.mlockall(MCL_CURRENT | MCL_FUTURE)
+        if result != 0:
+            errno_val = ctypes.get_errno()
+            raise OSError(errno_val, os.strerror(errno_val))
+        logging.info(
+            "Memory locked to RAM (mlockall MCL_CURRENT|MCL_FUTURE):"
+            " swapping disabled"
+        )
+    except Exception as e:
+        logging.warning("Failed to lock memory: %s", e)
 
 
 # Set a file-descriptor as non-blocking
