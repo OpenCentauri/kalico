@@ -33,6 +33,7 @@ class HX711SEndstopWrapper:
         self._home_cmd = None
         self._query_cmd = None
         self._mcu.register_config_callback(self._build_config)
+        self._is_multi_probe = False
 
     def _handle_mcu_identify(self):
         kin = self._printer.lookup_object('toolhead').get_kinematics()
@@ -105,23 +106,28 @@ class HX711SEndstopWrapper:
         return self._hx711s.is_triggered()
 
     def probing_move(self, pos, speed, gcmd):
-        """Calibrate sensors then execute a trsync-based probing move."""
-        toolhead = self._printer.lookup_object('toolhead')
-        # Wait for pending moves (retract) to complete before calibrating
-        # so the sensor baseline isn't contaminated by bed contact
-        toolhead.wait_moves()
-        toolhead.dwell(0.100)
-        if not self._hx711s.calibration_start(30, 5.0):
-            raise self._printer.command_error(
-                "HX711S: Calibration failed before probe")
+        """Execute a trsync-based probing move, calibrating if not in a multi-probe."""
+        if not self._is_multi_probe:
+            toolhead = self._printer.lookup_object('toolhead')
+            toolhead.wait_moves()
+            toolhead.dwell(0.100)
+            if not self._hx711s.calibration_start(30, 5.0):
+                raise self._printer.command_error(
+                    "HX711S: Calibration failed before probe")
         phoming = self._printer.lookup_object('homing')
         return phoming.probing_move(self, pos, speed)
 
     def multi_probe_begin(self):
-        pass
+        toolhead = self._printer.lookup_object('toolhead')
+        toolhead.wait_moves()
+        toolhead.dwell(0.100)
+        if not self._hx711s.calibration_start(30, 5.0):
+            raise self._printer.command_error(
+                "HX711S: Calibration failed before probing")
+        self._is_multi_probe = True
 
     def multi_probe_end(self):
-        pass
+        self._is_multi_probe = False
 
     def probe_prepare(self, hmove):
         pass
