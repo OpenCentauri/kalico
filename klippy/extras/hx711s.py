@@ -43,11 +43,13 @@ class HX711SEndstopWrapper:
     def _build_config(self):
         self._home_cmd = self._mcu.lookup_command(
             "hx711s_home oid=%c trsync_oid=%c clock=%u"
-            " trigger_reason=%c error_reason=%c")
+            " trigger_reason=%c error_reason=%c",
+            cq=self._cmd_queue)
         self._query_cmd = self._mcu.lookup_query_command(
             "hx711s_query_state oid=%c",
             "hx711s_state oid=%c is_triggered=%c trigger_ticks=%u",
-            oid=self._hx711s.oid)
+            oid=self._hx711s.oid,
+            cq=self._cmd_queue)
 
     # MCU endstop interface
     def get_mcu(self):
@@ -75,15 +77,16 @@ class HX711SEndstopWrapper:
 
     def home_wait(self, home_end_time):
         self._dispatch.wait_end(home_end_time)
+        # Stop trsync first
+        res = self._dispatch.stop()
+        logging.info("HX711S: home_wait dispatch reason=%d", res)
+        # Now safe to query and clean up MCU state
         params = self._query_cmd.send([self._hx711s.oid])
         trigger_ticks = params['trigger_ticks']
         is_triggered = params['is_triggered']
         logging.info("HX711S: home_wait query: is_triggered=%s"
-                     " trigger_ticks=%u", is_triggered, trigger_ticks)
-        # Stop homing on MCU before dispatch.stop()
+                    " trigger_ticks=%u", is_triggered, trigger_ticks)
         self._home_cmd.send([self._hx711s.oid, 0, 0, 0, 0])
-        res = self._dispatch.stop()
-        logging.info("HX711S: home_wait dispatch reason=%d", res)
         if res >= REASON_COMMS_TIMEOUT:
             raise self._printer.command_error(
                 "HX711S: Communication timeout during homing")
@@ -121,9 +124,6 @@ class HX711SEndstopWrapper:
         pass
 
     def probe_prepare(self, hmove):
-        toolhead = self._printer.lookup_object('toolhead')
-        toolhead.wait_moves()
-        toolhead.dwell(0.100)
         pass
 
     def probe_finish(self, hmove):
