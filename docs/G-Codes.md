@@ -1235,10 +1235,25 @@ The following command is available when one or more
 `MOVE_DEBUG [NAME=<config_name>] [TIME=<seconds>] [DIRECTION=forwards|backwards] [SPEED=<mm/s>]`:
 Run the selected drv8833 lane for a fixed duration while the MCU PID loop
 chases the requested target speed using motor hall pulse feedback. Every
-500ms this command reports hall and odometer click counts, hall and
-odometer mm/s, and the current duty cycle. `TIME` defaults to 5,
+500ms this command reports hall click counts, hall mm/s, and the current
+duty cycle. `TIME` defaults to 5,
 `DIRECTION` defaults to `forwards`, and `SPEED` defaults to 40. If exactly
 one drv8833 section is configured then `NAME` may be omitted.
+
+#### DRV_SET_SPEED
+`DRV_SET_SPEED [NAME=<config_name>] SPEED=<mm/s>`:
+Set the selected drv8833 lane speed in mm/s. Positive values run forwards,
+negative values run backwards, and `SPEED=0` stops the motor. If exactly
+one drv8833 section is configured then `NAME` may be omitted.
+
+#### DRV_MOVE
+`DRV_MOVE [NAME=<config_name>] SPEED=<mm/s> DISTANCE=<mm>`:
+Run the selected drv8833 lane at the requested speed until the requested
+distance is reached, using motor hall ticks to stop the move on the MCU.
+Positive `SPEED` runs forwards, negative `SPEED` runs backwards, and if
+`DISTANCE` is negative then the sign of `SPEED` is flipped before the move
+starts. If exactly one drv8833 section is configured then `NAME` may be
+omitted.
 
 #### SET_DRV8833_PID
 `SET_DRV8833_PID [NAME=<config_name>] [KP=<value>] [KI=<value>] [KD=<value>] [SAVE=0|1]`:

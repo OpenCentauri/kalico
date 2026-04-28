@@ -4,14 +4,10 @@
 import math
 import os
 
-from . import pulse_counter
-
 HALL_POLL_TIME = 0.001
 CONTROL_INTERVAL = 0.010
 MCU_REPORT_INTERVAL = 0.050
 DEBUG_LOG_INTERVAL = 0.500
-COUNTER_SAMPLE_TIME = 0.050
-COUNTER_POLL_TIME = 0.001
 DEFAULT_DUTY = 50.0
 MAX_DUTY_STEP = 4.0
 DEFAULT_PID_KP = 1.2
@@ -37,44 +33,12 @@ def _clamp(value, min_value, max_value):
     return max(min_value, min(max_value, value))
 
 
-class PulseTracker:
-    def __init__(self, printer, pin, resolution, sample_time=COUNTER_SAMPLE_TIME):
-        self.resolution = resolution
-        self.speed_mm_s = 0.0
-        self.total_count = 0
-        self.last_edge_time = None
-        self.last_interval = 0.0
-        self.counter = pulse_counter.MCU_counter(
-            printer, pin, sample_time, COUNTER_POLL_TIME
-        )
-        self.mcu = self.counter._mcu
-        self.counter.setup_callback(self._handle_counter)
+class Drv8833Interface:
+    def drv8833_set_speed(self, speed: float):
+        raise NotImplementedError()
 
-    def _handle_counter(self, sample_time, count, count_time):
-        delta_count = count - self.total_count
-        self.total_count = count
-        if delta_count <= 0:
-            return
-        if self.last_edge_time is not None:
-            delta_time = count_time - self.last_edge_time
-            if delta_time > 0.0:
-                self.last_interval = delta_time / float(delta_count)
-                self.speed_mm_s = (
-                    float(delta_count) * self.resolution / delta_time
-                )
-        self.last_edge_time = count_time
-
-    def get_count(self):
-        return self.total_count
-
-    def get_speed(self, eventtime):
-        if self.last_edge_time is None:
-            return 0.0
-        stale_time = max(0.250, self.last_interval * 4.0)
-        current_print_time = self.mcu.estimated_print_time(eventtime)
-        if current_print_time - self.last_edge_time > stale_time:
-            return 0.0
-        return self.speed_mm_s
+    def drv8833_move(self, speed: float, distance: float):
+        raise NotImplementedError()
 
 
 class MCUDrv8833Controller:
@@ -158,11 +122,12 @@ class MCUDrv8833Controller:
             is_init=True,
         )
         self.mcu.add_config_cmd(
-            "drv8833_set oid=%d enable=0 direction=1 target_speed=0" % (self.oid,),
+            "drv8833_set oid=%d enable=0 direction=1 target_speed=0 stop_ticks=0"
+            % (self.oid,),
             on_restart=True,
         )
         self._set_cmd = self.mcu.lookup_command(
-            "drv8833_set oid=%c enable=%c direction=%c target_speed=%u"
+            "drv8833_set oid=%c enable=%c direction=%c target_speed=%u stop_ticks=%u"
         )
         self._manual_cmd = self.mcu.lookup_command(
             "drv8833_manual oid=%c enable=%c direction=%c duty=%hu"
@@ -182,6 +147,9 @@ class MCUDrv8833Controller:
         self.status_callback()
 
     def start(self, direction, target_speed):
+        self.start_move(direction, target_speed, 0)
+
+    def start_move(self, direction, target_speed, stop_ticks):
         set_cmd = self._set_cmd
         if set_cmd is None:
             raise self.printer.command_error("drv8833 controller not configured")
@@ -191,6 +159,7 @@ class MCUDrv8833Controller:
                 1,
                 1 if direction > 0 else 0,
                 int(round(target_speed * SPEED_SCALE)),
+                int(stop_ticks),
             ]
         )
 
@@ -227,7 +196,7 @@ class MCUDrv8833Controller:
         set_cmd = self._set_cmd
         if set_cmd is None:
             raise self.printer.command_error("drv8833 controller not configured")
-        set_cmd.send([self.oid, 0, 1, 0])
+        set_cmd.send([self.oid, 0, 1, 0, 0])
 
 
 class Drv8833PIDAutoTune:
@@ -440,6 +409,8 @@ class Drv8833PIDAutoTune:
 
 class Drv8833CommandHelper:
     cmd_MOVE_DEBUG_help = "Run a timed DRV8833 debug move"
+    cmd_DRV_SET_SPEED_help = "Set DRV8833 speed in mm/s"
+    cmd_DRV_MOVE_help = "Run a DRV8833 move for a target distance in mm"
     cmd_DRV8833_PID_TUNE_help = "Run relay autotune for DRV8833 PID gains"
     cmd_SET_DRV8833_PID_help = "Update DRV8833 PID gains"
 
@@ -450,12 +421,32 @@ class Drv8833CommandHelper:
             "MOVE_DEBUG", self.cmd_MOVE_DEBUG, desc=self.cmd_MOVE_DEBUG_help
         )
         self.gcode.register_command(
+            "DRV_SET_SPEED",
+            self.cmd_DRV_SET_SPEED,
+            desc=self.cmd_DRV_SET_SPEED_help,
+        )
+        self.gcode.register_command(
+            "DRV_MOVE",
+            self.cmd_DRV_MOVE,
+            desc=self.cmd_DRV_MOVE_help,
+        )
+        self.gcode.register_command(
             "DRV_PID_TUNE",
             self.cmd_DRV8833_PID_TUNE,
             desc=self.cmd_DRV8833_PID_TUNE_help,
         )
         self.gcode.register_command(
+            "DRV8833_PID_TUNE",
+            self.cmd_DRV8833_PID_TUNE,
+            desc=self.cmd_DRV8833_PID_TUNE_help,
+        )
+        self.gcode.register_command(
             "DRV_SET_PID",
+            self.cmd_SET_DRV8833_PID,
+            desc=self.cmd_SET_DRV8833_PID_help,
+        )
+        self.gcode.register_command(
+            "SET_DRV8833_PID",
             self.cmd_SET_DRV8833_PID,
             desc=self.cmd_SET_DRV8833_PID_help,
         )
@@ -483,6 +474,12 @@ class Drv8833CommandHelper:
     def cmd_MOVE_DEBUG(self, gcmd):
         self._lookup_lane(gcmd).cmd_MOVE_DEBUG(gcmd)
 
+    def cmd_DRV_SET_SPEED(self, gcmd):
+        self._lookup_lane(gcmd).cmd_DRV_SET_SPEED(gcmd)
+
+    def cmd_DRV_MOVE(self, gcmd):
+        self._lookup_lane(gcmd).cmd_DRV_MOVE(gcmd)
+
     def cmd_DRV8833_PID_TUNE(self, gcmd):
         self._lookup_lane(gcmd).cmd_DRV8833_PID_TUNE(gcmd)
 
@@ -490,7 +487,7 @@ class Drv8833CommandHelper:
         self._lookup_lane(gcmd).cmd_SET_DRV8833_PID(gcmd)
 
 
-class PrinterDrv8833:
+class PrinterDrv8833(Drv8833Interface):
     def __init__(self, config):
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
@@ -517,11 +514,6 @@ class PrinterDrv8833:
             config, motor_fwd_params, motor_rwd_params, hall_params
         )
         self.hall_controller.status_callback = self._handle_hall_status
-        self.odometer = PulseTracker(
-            self.printer,
-            config.get("odometer"),
-            config.getfloat("odometer_resolution", above=0.0),
-        )
         self.active = False
         self.manual_mode = False
         self.direction = 1
@@ -530,7 +522,6 @@ class PrinterDrv8833:
         self.debug_gcmd = None
         self.debug_next_log_time = 0.0
         self.debug_hall_start = 0
-        self.debug_odometer_start = 0
         cmd_helper = self.printer.lookup_object("drv8833_command_helper", None)
         if cmd_helper is None:
             cmd_helper = Drv8833CommandHelper(self.printer)
@@ -548,7 +539,6 @@ class PrinterDrv8833:
             "target_speed": self.target_speed,
             "duty_cycle": self.hall_controller.last_duty_cycle,
             "hall_speed": self.hall_controller.last_speed_mm_s,
-            "odometer_speed": self.odometer.get_speed(eventtime),
             "pid_kp": self.hall_controller.pid_kp,
             "pid_ki": self.hall_controller.pid_ki,
             "pid_kd": self.hall_controller.pid_kd,
@@ -561,6 +551,10 @@ class PrinterDrv8833:
         self._stop(self.reactor.monotonic())
 
     def _handle_hall_status(self):
+        self.active = self.hall_controller.last_active
+        self.manual_mode = self.hall_controller.last_manual
+        if not self.active:
+            self.target_speed = 0.0
         if self.debug_gcmd is None:
             return
         eventtime = self.reactor.monotonic()
@@ -574,6 +568,9 @@ class PrinterDrv8833:
         )
 
     def _start(self, eventtime, direction, target_speed):
+        self._start_move(eventtime, direction, target_speed, 0)
+
+    def _start_move(self, eventtime, direction, target_speed, stop_ticks):
         if self.active:
             raise self.printer.command_error(
                 "drv8833 %s is already running" % (self.name,)
@@ -583,7 +580,7 @@ class PrinterDrv8833:
         self.direction = direction
         self.direction_name = "forwards" if direction > 0 else "backwards"
         self.target_speed = target_speed
-        self.hall_controller.start(direction, target_speed)
+        self.hall_controller.start_move(direction, target_speed, stop_ticks)
 
     def _start_manual(self, eventtime, direction, duty_cycle):
         if not self.active:
@@ -615,36 +612,61 @@ class PrinterDrv8833:
 
     def _get_debug_totals(self):
         hall_clicks = self.hall_controller.last_count - self.debug_hall_start
-        odometer_clicks = self.odometer.get_count() - self.debug_odometer_start
         return {
             "hall_clicks": hall_clicks,
             "hall_mm": hall_clicks * self.hall_controller.hall_resolution,
-            "odometer_clicks": odometer_clicks,
-            "odometer_mm": odometer_clicks * self.odometer.resolution,
         }
 
     def _format_debug_message(self, eventtime):
         totals = self._get_debug_totals()
         return (
             "drv8833 %s: direction=%s target=%.3fmm/s hall_clicks=%d "
-            "hall_speed=%.3fmm/s odometer_clicks=%d odometer_speed=%.3fmm/s "
-            "duty=%.1f%%"
+            "hall_speed=%.3fmm/s duty=%.1f%%"
             % (
                 self.name,
                 self.direction_name,
                 self.target_speed,
                 totals["hall_clicks"],
                 self.hall_controller.last_speed_mm_s,
-                totals["odometer_clicks"],
-                self.odometer.get_speed(eventtime),
                 self.hall_controller.last_duty_cycle,
             )
         )
 
+    def drv8833_set_speed(self, speed: float):
+        eventtime = self.reactor.monotonic()
+        if speed == 0.0:
+            self._stop(eventtime)
+            return
+        direction = 1 if speed > 0.0 else -1
+        target_speed = abs(speed)
+        if self.active:
+            self._stop(eventtime)
+        self._start(eventtime, direction, target_speed)
+
+    def drv8833_move(self, speed: float, distance: float):
+        eventtime = self.reactor.monotonic()
+        if distance < 0.0:
+            speed *= -1.0
+        distance = abs(distance)
+        if speed == 0.0 or distance == 0.0:
+            self._stop(eventtime)
+            return
+        direction = 1 if speed > 0.0 else -1
+        target_speed = abs(speed)
+        stop_ticks = max(
+            1,
+            int(round(distance / self.hall_controller.hall_resolution)),
+        )
+        if self.active:
+            self._stop(eventtime)
+        self._start_move(eventtime, direction, target_speed, stop_ticks)
+
     cmd_MOVE_DEBUG_help = (
-        "Run the DRV8833 lane for a fixed time while logging sensor counts, "
-        "sensor speeds, and duty cycle"
+        "Run the DRV8833 lane for a fixed time while logging hall counts, "
+        "hall speed, and duty cycle"
     )
+    cmd_DRV_SET_SPEED_help = "Set the DRV8833 lane speed in mm/s"
+    cmd_DRV_MOVE_help = "Run the DRV8833 lane for a target distance in mm"
 
     def cmd_MOVE_DEBUG(self, gcmd):
         duration = gcmd.get_float("TIME", 5.0, above=0.0)
@@ -658,7 +680,6 @@ class PrinterDrv8833:
         self.debug_next_log_time = eventtime
         # The MCU resets hall count to zero at the start of each move.
         self.debug_hall_start = 0
-        self.debug_odometer_start = self.odometer.get_count()
         self._start(eventtime, direction_value, speed)
         endtime = eventtime + duration
         try:
@@ -669,15 +690,28 @@ class PrinterDrv8833:
             self._stop(self.reactor.monotonic())
         totals = self._get_debug_totals()
         gcmd.respond_info(
-            "drv8833 %s move complete: hall_clicks=%d hall_distance=%.3fmm "
-            "odometer_clicks=%d odometer_distance=%.3fmm"
+            "drv8833 %s move complete: hall_clicks=%d hall_distance=%.3fmm"
             % (
                 self.name,
                 totals["hall_clicks"],
                 totals["hall_mm"],
-                totals["odometer_clicks"],
-                totals["odometer_mm"],
             )
+        )
+
+    def cmd_DRV_SET_SPEED(self, gcmd):
+        speed = gcmd.get_float("SPEED")
+        self.drv8833_set_speed(speed)
+        gcmd.respond_info(
+            "drv8833 %s speed set to %.3fmm/s" % (self.name, speed)
+        )
+
+    def cmd_DRV_MOVE(self, gcmd):
+        speed = gcmd.get_float("SPEED")
+        distance = gcmd.get_float("DISTANCE")
+        self.drv8833_move(speed, distance)
+        gcmd.respond_info(
+            "drv8833 %s move started: speed=%.3fmm/s distance=%.3fmm"
+            % (self.name, speed, distance)
         )
 
     def cmd_SET_DRV8833_PID(self, gcmd):

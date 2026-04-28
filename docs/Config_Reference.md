@@ -4246,11 +4246,11 @@ pin:
 CANVAS-style DRV8833 motor control (one may define any number
 of sections with a "drv8833" prefix). This extra drives a two-input
 H-bridge with hardware PWM on either the forward or reverse leg, tracks
-motor-hall and odometer pulse counts, estimates both sensor speeds from
-the elapsed time between trigger events, and runs the speed PID loop on
-the MCU. The host provides debug logging, odometer tracking, and PID
-tuning commands. Use the [drv8833 g-code commands](G-Codes.md#drv8833)
-to run and tune it.
+motor-hall pulses, estimates hall speed from the elapsed time between
+trigger events, and runs the speed PID loop on the MCU. The host
+provides debug logging, a small motion-control interface, and PID tuning
+commands. Use the [drv8833 g-code commands](G-Codes.md#drv8833) to run
+and tune it.
 
 ```
 [drv8833 canvas_lane1]
@@ -4285,12 +4285,6 @@ motor_hall:
 motor_hall_resolution:
 #   Linear travel in millimeters represented by one motor hall pulse.
 #   This parameter must be provided.
-odometer:
-#   Input pin used for the odometer pulse counter. This parameter must
-#   be provided.
-odometer_resolution:
-#   Linear travel in millimeters represented by one odometer pulse. This
-#   parameter must be provided.
 ```
 
 ### [static_pwm_clock]

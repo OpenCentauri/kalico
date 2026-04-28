@@ -29,6 +29,7 @@ struct drv8833 {
     uint32_t next_control_time;
     uint32_t next_report_time;
     uint32_t count;
+    uint32_t stop_count;
     uint32_t last_edge_time;
     uint32_t last_interval_ticks;
     uint32_t hall_resolution;
@@ -175,6 +176,7 @@ static void
 drv8833_reset_state(struct drv8833 *d)
 {
     d->count = 0;
+    d->stop_count = 0;
     d->last_edge_time = 0;
     d->last_interval_ticks = 0;
     d->speed_mm_s_x1000 = 0;
@@ -195,6 +197,17 @@ drv8833_event(struct timer *timer)
             d->last_interval_ticks = time - d->last_edge_time;
         d->last_edge_time = time;
         d->last_hall_value = hall_value;
+        if ((d->flags & DF_ACTIVE) && d->stop_count && d->count >= d->stop_count) {
+            d->flags &= ~(DF_ACTIVE | DF_MANUAL);
+            d->target_speed_mm_s_x1000 = 0;
+            d->stop_count = 0;
+            d->integral = 0;
+            d->previous_error = 0;
+            d->duty_x10 = 0;
+            drv8833_apply_pwm(d);
+            d->flags |= DF_PENDING;
+            sched_wake_task(&drv8833_wake);
+        }
     }
 
     if (!timer_is_before(time, d->next_control_time)) {
@@ -261,6 +274,7 @@ command_drv8833_set(uint32_t *args)
     d->direction = !!args[2];
     d->target_speed_mm_s_x1000 = args[3];
     drv8833_reset_state(d);
+    d->stop_count = args[4];
     d->duty_x10 = d->default_duty_x10;
     d->last_hall_value = gpio_in_read(d->hall_pin);
     d->next_control_time = now;
@@ -271,7 +285,8 @@ command_drv8833_set(uint32_t *args)
     sched_wake_task(&drv8833_wake);
 }
 DECL_COMMAND(command_drv8833_set,
-             "drv8833_set oid=%c enable=%c direction=%c target_speed=%u");
+             "drv8833_set oid=%c enable=%c direction=%c target_speed=%u"
+             " stop_ticks=%u");
 
 void
 command_drv8833_manual(uint32_t *args)
