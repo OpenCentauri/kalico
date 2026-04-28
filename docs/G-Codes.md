@@ -1226,6 +1226,37 @@ parsed as Python literals). If TEMPLATE is an empty string then this
 command will clear any previous template assigned to the pin (one can
 then use `SET_PIN` commands to manage the values directly).
 
+### [drv8833]
+
+The following command is available when one or more
+[drv8833 config sections](Config_Reference.md#drv8833) are enabled.
+
+#### MOVE_DEBUG
+`MOVE_DEBUG [NAME=<config_name>] [TIME=<seconds>] [DIRECTION=forwards|backwards] [SPEED=<mm/s>]`:
+Run the selected drv8833 lane for a fixed duration while the MCU PID loop
+chases the requested target speed using motor hall pulse feedback. Every
+500ms this command reports hall and odometer click counts, hall and
+odometer mm/s, and the current duty cycle. `TIME` defaults to 5,
+`DIRECTION` defaults to `forwards`, and `SPEED` defaults to 40. If exactly
+one drv8833 section is configured then `NAME` may be omitted.
+
+#### SET_DRV8833_PID
+`SET_DRV8833_PID [NAME=<config_name>] [KP=<value>] [KI=<value>] [KD=<value>] [SAVE=0|1]`:
+Update the selected drv8833 lane's PID gains for the current session.
+When `SAVE=1`, the new gains are staged for `SAVE_CONFIG` so they are
+written back to the printer configuration file. If exactly one drv8833
+section is configured then `NAME` may be omitted.
+
+#### DRV8833_PID_TUNE
+`DRV8833_PID_TUNE [NAME=<config_name>] [SPEED=<mm/s>] [DIRECTION=forwards|backwards] [BAND=<mm/s>] [RELAY_DUTY=<percent>] [SETTLE_TIME=<seconds>] [SAMPLE_TIME=<seconds>] [TIMEOUT=<seconds>] [WRITE_FILE=0|1]`:
+Run a host-side relay autotune for the selected drv8833 lane at the given
+target speed. The tune command drives the motor in MCU manual-duty mode,
+measures the hall-speed oscillation, computes PID gains, applies them for
+the current session, and stages them for `SAVE_CONFIG`. `BAND` controls
+the speed window around `SPEED` used for switching relay duty. When
+`WRITE_FILE=1`, a CSV log is written to `/tmp/drv8833_<name>_pid_tune.csv`.
+If exactly one drv8833 section is configured then `NAME` may be omitted.
+
 ### [palette2]
 
 The following commands are available when the

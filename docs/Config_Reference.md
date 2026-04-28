@@ -4241,6 +4241,58 @@ pin:
 #   These options are deprecated and should no longer be specified.
 ```
 
+### [drv8833]
+
+CANVAS-style DRV8833 motor control (one may define any number
+of sections with a "drv8833" prefix). This extra drives a two-input
+H-bridge with hardware PWM on either the forward or reverse leg, tracks
+motor-hall and odometer pulse counts, estimates both sensor speeds from
+the elapsed time between trigger events, and runs the speed PID loop on
+the MCU. The host provides debug logging, odometer tracking, and PID
+tuning commands. Use the [drv8833 g-code commands](G-Codes.md#drv8833)
+to run and tune it.
+
+```
+[drv8833 canvas_lane1]
+motor_fwd:
+#   Hardware PWM capable pin used for forward drive. This parameter must
+#   be provided.
+#motor_cycle_time: 0.002
+#   Requested PWM cycle time in seconds. Hardware PWM is always enabled
+#   for both motor outputs. The default is 0.002 seconds.
+#default_duty: 50.0
+#   Bias duty cycle, in percent, used as the PID controller's center
+#   point. The default is 50.0.
+#max_duty_step: 4.0
+#   Maximum duty-cycle change, in percent, that the MCU may apply on one
+#   PID update. Lower values produce a gentler slope when approaching the
+#   target speed. The default is 4.0.
+#pid_kp: 1.2
+#   Proportional gain, in duty-percent per mm/s of speed error. The
+#   default is 1.2.
+#pid_ki: 0.8
+#   Integral gain, in duty-percent per (mm/s * second). The default is
+#   0.8.
+#pid_kd: 0.02
+#   Derivative gain, in duty-percent * second per mm/s. The default is
+#   0.02.
+motor_rwd:
+#   Hardware PWM capable pin used for reverse drive. This parameter must
+#   be provided.
+motor_hall:
+#   Input pin used for the motor hall pulse counter. This parameter must
+#   be provided.
+motor_hall_resolution:
+#   Linear travel in millimeters represented by one motor hall pulse.
+#   This parameter must be provided.
+odometer:
+#   Input pin used for the odometer pulse counter. This parameter must
+#   be provided.
+odometer_resolution:
+#   Linear travel in millimeters represented by one odometer pulse. This
+#   parameter must be provided.
+```
+
 ### [static_pwm_clock]
 
 Static configurable output pin (one may define any number of

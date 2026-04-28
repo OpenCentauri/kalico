@@ -145,6 +145,10 @@ config WANT_PULSE_COUNTER
     bool
     depends on HAVE_GPIO
     default y
+config WANT_DRV8833
+    bool
+    depends on HAVE_GPIO && WANT_HARD_PWM
+    default y
 config WANT_ST7920
     bool
     depends on HAVE_GPIO
