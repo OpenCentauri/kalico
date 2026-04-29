@@ -617,6 +617,11 @@ class PrinterDrv8833(Drv8833Interface):
             "hall_mm": hall_clicks * self.hall_controller.hall_resolution,
         }
 
+    def _wait_for_move_complete(self, eventtime):
+        while self.active:
+            eventtime = self.reactor.pause(eventtime + MCU_REPORT_INTERVAL)
+        return eventtime
+
     def _format_debug_message(self, eventtime):
         totals = self._get_debug_totals()
         return (
@@ -660,6 +665,7 @@ class PrinterDrv8833(Drv8833Interface):
         if self.active:
             self._stop(eventtime)
         self._start_move(eventtime, direction, target_speed, stop_ticks)
+        self._wait_for_move_complete(eventtime)
 
     cmd_MOVE_DEBUG_help = (
         "Run the DRV8833 lane for a fixed time while logging hall counts, "
@@ -709,9 +715,21 @@ class PrinterDrv8833(Drv8833Interface):
         speed = gcmd.get_float("SPEED")
         distance = gcmd.get_float("DISTANCE")
         self.drv8833_move(speed, distance)
+        totals = {
+            "hall_clicks": self.hall_controller.last_count,
+            "hall_mm": self.hall_controller.last_count
+            * self.hall_controller.hall_resolution,
+        }
         gcmd.respond_info(
-            "drv8833 %s move started: speed=%.3fmm/s distance=%.3fmm"
-            % (self.name, speed, distance)
+            "drv8833 %s move complete: speed=%.3fmm/s distance=%.3fmm "
+            "hall_clicks=%d hall_distance=%.3fmm"
+            % (
+                self.name,
+                speed,
+                distance,
+                totals["hall_clicks"],
+                totals["hall_mm"],
+            )
         )
 
     def cmd_SET_DRV8833_PID(self, gcmd):

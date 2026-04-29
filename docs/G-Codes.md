@@ -1252,8 +1252,8 @@ Run the selected drv8833 lane at the requested speed until the requested
 distance is reached, using motor hall ticks to stop the move on the MCU.
 Positive `SPEED` runs forwards, negative `SPEED` runs backwards, and if
 `DISTANCE` is negative then the sign of `SPEED` is flipped before the move
-starts. If exactly one drv8833 section is configured then `NAME` may be
-omitted.
+starts. This command blocks until the move has finished. If exactly one
+drv8833 section is configured then `NAME` may be omitted.
 
 #### SET_DRV8833_PID
 `SET_DRV8833_PID [NAME=<config_name>] [KP=<value>] [KI=<value>] [KD=<value>] [SAVE=0|1]`:
