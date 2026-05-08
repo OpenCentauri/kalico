@@ -1144,6 +1144,9 @@ control:
 #   not recommended to set this unless there is an electrical
 #   requirement to switch the heater faster than 10 times a second.
 #   The default is 0.100 seconds.
+#lost_update_tolerance: 2
+#   Maximum number of consecutive sensor lost samples that can be
+#   recovered from.
 #min_extrude_temp: 170
 #   The minimum temperature (in Celsius) at which extruder move
 #   commands may be issued. The default is 170 Celsius.
@@ -1563,6 +1566,20 @@ extended [G-Code command](G-Codes.md#z_tilt) becomes available.
 #use_adjustments: False
 #   If set to true it uses the behaviour described by trails here:
 #   https://github.com/Trails5000/klipper/commit/47b5a91f96761961e693031fa514a0025a877117
+#alternate_probe_direction: False
+#   If True, alternate the physical probing direction between full
+#   probing passes/retries. The first pass uses the configured point
+#   order, and the next pass probes the same points in reverse order.
+#   The measured results are still returned in the configured logical
+#   point order, so the z_tilt calculations are unchanged. This can
+#   reduce repeated twisting of Bowden tubes, filament paths, umbilicals,
+#   and cable bundles on large-format machines. It also avoids the extra
+#   travel move from the last point back to the first point between retry
+#   passes. The default is False.
+#start_reverse: False
+#   If True and alternate_probe_direction is enabled, start the first
+#   probing pass in reverse order. Subsequent retry passes will continue
+#   alternating direction. The default is False.
 ```
 
 #### [z_tilt_ng]
@@ -1707,6 +1724,20 @@ Where x is the 0, 0 point on the bed
 #   By default, the first Z movement to reach `horizontal_move_z` uses `speed`.
 #   Set `enforce_lift_speed` to True to enforce the `lift_speed`.
 #   The default is False.
+#alternate_probe_direction: False
+#   If True, alternate the physical probing direction between full
+#   probing passes/retries. The first pass uses the configured point
+#   order, and the next pass probes the same points in reverse order.
+#   The measured results are still returned in the configured logical
+#   point order, so the quad gantry leveling calculations are unchanged.
+#   This can reduce repeated twisting of Bowden tubes, filament paths,
+#   umbilicals, and cable bundles on large-format machines. It also
+#   avoids the extra travel move from the last point back to the first
+#   point between retry passes. The default is False.
+#start_reverse: False
+#   If True and alternate_probe_direction is enabled, start the first
+#   probing pass in reverse order. Subsequent retry passes will continue
+#   alternating direction. The default is False.
 ```
 
 ### [skew_correction]
@@ -2508,7 +2539,7 @@ z_offset:
 #   printers that have an outlier first sample.
 #⚠️ bad_probe_strategy: RETRY
 #   Strategy to apply when a probe attempt is considered "bad" based on
-#   the probe's quality detection logic. If the probe doesnt support
+#   the probe's quality detection logic. If the probe doesn't support 
 #   quality detection all probes are assumed to be good.
 #   One of: fail, ignore, retry or circle.
 #   - fail: Stop immediately with an error on first bad probe.
@@ -3316,6 +3347,7 @@ target temperature.
 #pid_Ki:
 #pid_Kd:
 #pwm_cycle_time:
+#lost_update_tolerance:
 #min_temp:
 #max_temp:
 #   See the "extruder" section for the definition of the above
@@ -3463,9 +3495,9 @@ sensor_type: BME280
 #   above parameters.
 ```
 
-### AHT10/AHT20/AHT21 temperature sensor
+### AHT10/AHT20/AHT21/AHT30 temperature sensor
 
-AHT10/AHT20/AHT21 two wire interface (I2C) environmental sensors.
+AHT10/AHT20/AHT21/AHT30 two wire interface (I2C) environmental sensors.
 Note that these sensors are not intended for use with extruders and
 heater beds, but rather for monitoring ambient temperature (C) and
 relative humidity. See
@@ -3474,7 +3506,8 @@ that may be used to report humidity in addition to temperature.
 
 ```
 sensor_type: AHT10
-#   Also use AHT10 for AHT20 and AHT21 sensors.
+#   Must be "AHT1X" , "AHT2X", "AHT3X"
+#   Some AHT20 sensors can use "AHT1X"
 #i2c_address:
 #   Default is 56 (0x38). Some AHT10 sensors give the option to use
 #   57 (0x39) by moving a resistor.
@@ -6000,8 +6033,76 @@ sensors:
 #   sensor's contribution. Example: sensors: hx71x sg0, !hx71x sg1
 ```
 
+#### ADS131M02
+The ADS131M02 is a 24 bit, 2-channel delta-sigma ADC with simultaneous
+sampling. It uses SPI communication and provides high precision measurements
+suitable for load cell probing.
+```
+[load_cell]
+sensor_type: ads131m02
+cs_pin:
+#   The pin connected to the ADS131M02 chip select line. This parameter must
+#   be provided.
+#spi_speed: 8192000
+#   SPI bus speed. The default is 8.192 MHz.
+#spi_bus:
+#spi_software_sclk_pin:
+#spi_software_mosi_pin:
+#spi_software_miso_pin:
+#   See the "common SPI settings" section for a description of the
+#   above parameters.
+data_ready_pin:
+#   Pin connected to the ADS131M02 data ready (DRDY) line. This parameter must
+#   be provided.
+#gain: 128
+#   Programmable gain amplifier setting. Valid values are 1, 2, 4, 8, 16, 32,
+#   64, and 128. The default is 128.
+#sample_rate: 500
+#   Sample rate in samples per second. Valid values are 250, 500, 1000, 2000,
+#   4000, 8000, 16000, and 32000. The default is 500.
+#enable_global_chop: False
+#   Enable the global chopper mode. This mode alternats the polarity of the inputs
+#   for each samlple. This reduces noise but also reduces the effective 
+#   sample rate to 1/3rd of its face value. Off by default.
+#gloabl_chop_delay: 16
+#   The delay, in clock cycles, between sample in global chop mode. This allows 
+#   additional time for settling before sampling starts. The chip default is 16 
+#   clock cycles. Values are powers of 2 from 2 to 65536. 
+#channels: 0
+#   Comma separated list of input channels to enable and sum. Valid channels are 0 and 1.
+#   The default is 0.
+```
+
+#### ADS131M04
+The ADS131M04 is a 24 bit, 4-channel delta-sigma ADC with simultaneous
+sampling. It uses SPI communication and provides high precision measurements
+suitable for load cell probing. Up to 4 channels can be combined into a single
+sensor ideal for under bed load cells.
+```
+[load_cell]
+sensor_type: ads131m04
+cs_pin:
+#spi_speed: 8192000
+#spi_bus:
+#spi_software_sclk_pin:
+#spi_software_mosi_pin:
+#spi_software_miso_pin:
+data_ready_pin:
+#gain: 128
+#sample_rate: 500
+#enable_global_chop: False
+#gloabl_chop_delay: 16
+#   See the "ADS131M02" sections for details on these parameters.
+#channels: 0
+#   Comma separated list of input channels to enable and sum. Valid channels
+#   are: 0, 1, 2, 3. The default is 0.
+```
+
+
 ### [load_cell_probe]
 Load Cell Probe. This combines the functionality of a [probe] and a [load_cell].
+
+See also [simple_tap_classifier] for tap validation configuration.
 
 ```
 [load_cell_probe]
@@ -6013,9 +6114,13 @@ sensor_type:
 #sensor_orientation:
 #   These parameters must be configured before the probe will operate.
 #   See the [load_cell] section for further details.
-#force_safety_limit: 5000
-#   The safe limit for probing force relative to the reference_tare_counts on
-#   the load_cell. The default is +/-2Kg.
+#force_safety_limit: 2000
+#   The safe force limit for starting a probe. This is relative to the 
+#   reference_tare_counts which is the sensor's absolute 0 force value.
+#   Set to 0 to disable. The default is +/-2Kg.
+#drift_safety_limit: 1000
+#   The maximum absolute force change allowed while probing. Set to 0 to disable.
+#   The default is +/-1Kg.
 #trigger_force: 75.0
 #   The force that the probe will trigger at. 75g is the default.
 #drift_filter_cutoff_frequency: 0.8
@@ -6046,6 +6151,36 @@ sensor_type:
 #   The time in seconds used for taring the load_cell before each probe. The
 #   default value is: 5 / 50 = 0.1. This collects samples from 5 cycles of
 #   50Hz / 6 cycles of 60Hz mains power to cancel power line noise.
+#disable_pullback_move: False
+#   When True, disables the pullback move and tap analysis after probe trigger.
+#   The probe will use the raw trigger position instead of the calculated Z=0
+#   from tap analysis. This reduces probe accuracy but may be useful for
+#   troubleshooting or compatibility testing. The default is False.
+#pullback_distance: 0.2
+#   The distance in mm to slowly raise the probe to perform precise Z=0
+#   measurments. This move occurs immediately after the probe detects contact.
+#   The distance needs to be approximatly 2x the distance required for the probe
+#   to break contact with the bed. Valid range is 0.01 to 2.0 mm.
+#   The default is 0.2 mm.
+#pullback_speed:
+#   The speed in mm/s for the pullback move after probe trigger. Valid range is
+#   0.1 to 1.0 mm/s. The default is set to 1 micron (0.001mm) per sensor sample.
+#tap_classifier_module:
+#   Optional module for custom tap validation. The default is TapQualityClassifier.
+#   Setting a custom classifier overrides TapQualityClassifier with your implementation.
+#min_tap_quality: 40.0
+#   The minimum acceptable tap quality score. Valid range is 0 to 100 percent.
+#   The default is 40%.
+#decompression_angle:
+#   The average angle of the decompression line for clean taps. The further the
+#   measured decompression angle is from this angle, the worse its tap quality score.
+#   There is no default, this must be measured. It is a number in degrees
+#   between 0 and 90.
+#max_approach_force: 50
+#max_departure_force: 25
+#max_baseline_force_delta: 25
+#max_dwell_force_drop: 75
+#   Maximums for tap quality checks expressed as a percentage.
 #z_offset:
 #speed:
 #samples:
@@ -6058,6 +6193,8 @@ sensor_type:
 #deactivate_gcode:
 #   See the "[probe]" section for a description of the above parameters.
 ```
+
+See [Tap Quality Components](Load_Cell.md#tap-quality-components) for more details on maximum for tap quality.
 
 ## Board specific hardware support
 
