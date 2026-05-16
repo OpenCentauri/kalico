@@ -143,6 +143,14 @@ load_cell_fusion_report_sample(struct load_cell_fusion_sensor *lcfs,
 }
 
 static void
+clear_sensor_updates(struct load_cell_fusion *lcf)
+{
+    uint8_t i;
+    for (i = 0; i < lcf->sensor_count; i++)
+        lcf->sensors[i].updated = 0;
+}
+
+static void
 load_cell_fusion_process_group(struct load_cell_fusion *lcf)
 {
     if (!lcf->active || !lcf->dirty)
@@ -160,6 +168,7 @@ load_cell_fusion_process_group(struct load_cell_fusion *lcf)
     for (i = 0; i < lcf->sensor_count; i++) {
         if (lcf->sensors[i].has_error) {
             add_sample(&lcf->sb, lcf->oid, lcf->sensors[i].last_sample);
+            clear_sensor_updates(lcf);
             return;
         }
     }
@@ -172,6 +181,7 @@ load_cell_fusion_process_group(struct load_cell_fusion *lcf)
     add_sample(&lcf->sb, lcf->oid, (uint32_t)fused);
     if (lcf->lce)
         load_cell_probe_report_sample(lcf->lce, fused);
+    clear_sensor_updates(lcf);
 }
 
 void
