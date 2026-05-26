@@ -6070,10 +6070,11 @@ data_ready_pin:
 ```
 
 #### HX711S
-Support for 1 to 4 HX711 chips wired as a multi-channel load cell sensor. All
-chips must share the same RATE pin so they update simultaneously. Each chip's
-reading is reported as a separate ADC channel and the `load_cell` sums them,
-making this suitable for under-bed configurations with multiple strain gauges.
+Support for 1 to 4 HX711 chips wired as a multi-channel load cell sensor. Each
+chip's reading is reported as a separate ADC channel and the `load_cell` sums
+them, making this suitable for under-bed configurations with multiple strain
+gauges. The driver waits for all chips to signal data ready before reading, so
+chips do not need to be perfectly phase-aligned.
 ```
 [load_cell]
 sensor_type: hx711s
@@ -6096,8 +6097,8 @@ sclk_pins:
 
 #### HX717S
 Support for 1 to 4 HX717 chips wired as a multi-channel load cell sensor. The
-HX717 is the higher sample rate version of the HX711. See
-[HX711S](#hx711s) for wiring requirements.
+HX717 is the higher sample rate version of the HX711. See [HX711S](#hx711s)
+for wiring notes; the same chip-per-pin model applies.
 ```
 [load_cell]
 sensor_type: hx717s

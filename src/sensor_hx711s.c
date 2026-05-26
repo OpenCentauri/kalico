@@ -97,8 +97,13 @@ hx711s_raw_read(struct gpio_in dout, struct gpio_out clk, int num_bits)
 static uint_fast8_t
 hx711s_is_data_ready(struct hx711s_adc *h)
 {
-    // All chips update simultaneously (shared RATE pin); check chip 0
-    return !gpio_in_read(h->sdos[0]);
+    // All chips must have DOUT low before reading; they share a RATE pin but
+    // may not be perfectly phase-aligned, so check every chip.
+    for (uint8_t i = 0; i < h->sensor_count; i++) {
+        if (gpio_in_read(h->sdos[i]))
+            return 0;
+    }
+    return 1;
 }
 
 static uint_fast8_t

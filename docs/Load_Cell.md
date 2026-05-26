@@ -504,11 +504,11 @@ These sensors are popular but have limitations:
 
 **Multi-sensor (hx711s / hx717s):**
 The `hx711s` and `hx717s` sensor types support 1 to 4 chips wired in parallel.
-All chips must share the same RATE pin so they update simultaneously. The
-firmware reads each chip sequentially and each chip's reading is reported as a
-separate ADC channel. The `load_cell` sums all channels for force measurement
-and probe triggering, equivalent to a hardware summing box. Example with two
-HX717 chips:
+The firmware waits for all chips to signal data ready (DOUT low) before reading
+any of them, so chips do not need to be perfectly phase-aligned. Each chip's
+reading is reported as a separate ADC channel and the `load_cell` sums all
+channels for force measurement and probe triggering, equivalent to a hardware
+summing box. Example with two HX717 chips:
 
 ```ini
 [load_cell_probe]
