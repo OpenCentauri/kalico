@@ -6069,6 +6069,54 @@ data_ready_pin:
 #   are: 0, 1, 2, 3. The default is 0.
 ```
 
+#### HX711S
+Support for 1 to 4 HX711 chips wired as a multi-channel load cell sensor. Each
+chip's reading is reported as a separate ADC channel and the `load_cell` sums
+them, making this suitable for under-bed configurations with multiple strain
+gauges. Each chip is read on its own data ready edge and never waits on another,
+so chips do not need to be phase-aligned.
+```
+[load_cell]
+sensor_type: hx711s
+sdo_pins:
+#   Comma-separated list of pins connected to the HX711 DOUT lines, one per
+#   chip. Between 1 and 4 pins must be specified. All pins must be on the same
+#   MCU. The first chip listed paces the sample stream. This parameter must be
+#   provided.
+sclk_pins:
+#   Comma-separated list of pins connected to the HX711 SCLK lines, one per
+#   chip. Must match the order and count of sdo_pins. This parameter must be
+#   provided.
+#gain: A-128
+#   Valid values are: A-128, A-64, B-32. The default is A-128. Changing the
+#   gain also selects the input channel. This setting applies to all chips.
+#sample_rate: 80
+#   Valid values are 80 or 10. The default is 80. This must match the hardware
+#   wiring of the RATE pin, which is shared by all chips. The sample rate
+#   cannot be changed in software.
+```
+
+#### HX717S
+Support for 1 to 4 HX717 chips wired as a multi-channel load cell sensor. The
+HX717 is the higher sample rate version of the HX711. See [HX711S](#hx711s)
+for wiring notes; the same chip-per-pin model applies.
+```
+[load_cell]
+sensor_type: hx717s
+sdo_pins:
+#   Comma-separated list of pins connected to the HX717 DOUT lines, one per
+#   chip. Between 1 and 4 pins must be specified. All pins must be on the same
+#   MCU.
+sclk_pins:
+#   Comma-separated list of pins connected to the HX717 SCLK lines, one per
+#   chip. Must match the order and count of sdo_pins.
+#gain: A-128
+#   Valid values are: A-128, B-64, A-64, B-8. The default is A-128.
+#sample_rate: 320
+#   Valid values are: 10, 20, 80, 320. The default is 320. This must match
+#   the hardware wiring of the RATE pin shared by all chips.
+```
+
 
 ### [load_cell_probe]
 Load Cell Probe. This combines the functionality of a [probe] and a [load_cell].
