@@ -24,6 +24,8 @@ reference_tare_counts: 12345
 
   * [`hx711`](Config_Reference.md#hx711)
   * [`hx717`](Config_Reference.md#hx717)
+  * [`hx711s`](Config_Reference.md#hx711s)
+  * [`hx717s`](Config_Reference.md#hx717s)
   * [`ads1220`](Config_Reference.md#ads1220)
   * [`ads131m02`](Config_Reference.md#ads131m02)
   * [`ads131m04`](Config_Reference.md#ads131m04)
@@ -499,3 +501,23 @@ These sensors are popular but have limitations:
 - Cannot communicate reset events to the MCU, hiding electrical faults
 - HX717 (320 Hz) strongly preferred over HX711 (80 Hz) for probing; limit HX711 probing speed to 2 mm/s
 - HX711 Sample rate is hardware-configured, not software-configurable; 10 SPS versions must be rewired for 80 SPS
+
+**Multi-sensor (hx711s / hx717s):**
+The `hx711s` and `hx717s` sensor types support 1 to 4 chips wired in parallel.
+All chips must share the same RATE pin so they update simultaneously. The
+firmware reads each chip sequentially and each chip's reading is reported as a
+separate ADC channel. The `load_cell` sums all channels for force measurement
+and probe triggering, equivalent to a hardware summing box. Example with two
+HX717 chips:
+
+```ini
+[load_cell_probe]
+sensor_type: hx717s
+sdo_pins: PA4, PA6
+sclk_pins: PA5, PA7
+sample_rate: 320
+counts_per_gram: 490
+reference_tare_counts: 24690
+trigger_force: 75
+z_offset: 0.0
+```
