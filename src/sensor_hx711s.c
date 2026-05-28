@@ -24,7 +24,6 @@
 struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
-    uint32_t last_error;
     uint8_t pending_flag;
     uint8_t sensor_count;
     uint8_t gain_channel;   // extra clock pulses: chip type + gain selection
@@ -147,6 +146,7 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     uint_fast8_t extras_mask = (1 << gain_channel) - 1;
     int32_t counts_buf[MAX_SENSORS];
     uint32_t adc[MAX_SENSORS];
+    uint32_t sample_error = 0;
 
     hx711s_raw_read(h, adc, 24 + gain_channel);
 
@@ -156,7 +156,7 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             raw |= 0xFF000000;
         counts_buf[i] = (int32_t)raw;
         if ((adc[i] & extras_mask) != extras_mask)
-            h->last_error = SAMPLE_ERROR_DESYNC;
+            sample_error = SAMPLE_ERROR_DESYNC;
     }
 
     // Capture and clear pending flag after all reads
@@ -166,11 +166,11 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     irq_enable();
 
     if (flags & HX711S_OVERFLOW)
-        h->last_error = SAMPLE_ERROR_READ_TOO_LONG;
+        sample_error = SAMPLE_ERROR_READ_TOO_LONG;
 
-    if (h->last_error) {
+    if (sample_error) {
         for (uint8_t i = 0; i < h->sensor_count; i++)
-            append_sample(h, (int32_t)h->last_error);
+            append_sample(h, (int32_t)sample_error);
     } else {
         int32_t sum = 0;
         for (uint8_t i = 0; i < h->sensor_count; i++) {
@@ -237,7 +237,6 @@ command_query_hx711s(uint32_t *args)
     struct hx711s_adc *h = oid_lookup(oid, command_config_hx711s);
     sched_del_timer(&h->timer);
     h->pending_flag = 0;
-    h->last_error = 0;
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         for (uint8_t i = 0; i < h->sensor_count; i++)

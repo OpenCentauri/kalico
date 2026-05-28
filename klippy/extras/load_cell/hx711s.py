@@ -138,9 +138,14 @@ class HX711SBase(LoadCellSensor):
             ptime = sample[0]
             channel_counts = sample[1:]
             val = channel_counts[0]
-            if val == SAMPLE_ERROR_DESYNC or val == SAMPLE_ERROR_READ_TOO_LONG:
+            if val == SAMPLE_ERROR_DESYNC:
                 self.last_error_count += 1
-                break  # subsequent errors are duplicates
+                logging.error("%s: DESYNC at t=%.3f", self.name, ptime)
+                continue
+            elif val == SAMPLE_ERROR_READ_TOO_LONG:
+                self.last_error_count += 1
+                logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
+                continue
             converted = [round(ptime, 6)]
             for ch in channel_counts:
                 converted.append(ch)
@@ -177,15 +182,13 @@ class HX711SBase(LoadCellSensor):
         self._convert_samples(samples)
         overflows = self.ffreader.get_last_overflows() - prev_overflows
         errors = self.last_error_count - prev_error_count
-        if errors > 0:
-            logging.error("%s: forced sensor restart due to error", self.name)
-            self._finish_measurements()
-            self._start_measurements()
-        elif overflows > 0:
+        if errors > 0 or overflows > 0:
             self.consecutive_fails += 1
             if self.consecutive_fails > 4:
                 logging.error(
-                    "%s: forced sensor restart due to overflows", self.name
+                    "%s: forced sensor restart (errors=%i, overflows=%i"
+                    " over %i batches)",
+                    self.name, errors, overflows, self.consecutive_fails,
                 )
                 self._finish_measurements()
                 self._start_measurements()
