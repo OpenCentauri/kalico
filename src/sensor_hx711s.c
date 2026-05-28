@@ -72,21 +72,27 @@ hx711s_delay(void)
         irq_poll();
 }
 
-static uint32_t
-hx711s_raw_read(struct gpio_in dout, struct gpio_out clk, int num_bits)
+// Read num_bits from all configured chips in lockstep. All SCKs toggle
+// together so each chip's post-read analog conversion starts at the same
+// instant and sees no further SCK activity during its sample window.
+static void
+hx711s_raw_read(struct hx711s_adc *h, uint32_t *bits_out, int num_bits)
 {
-    uint32_t bits_read = 0;
+    uint8_t n = h->sensor_count;
+    for (uint8_t i = 0; i < n; i++)
+        bits_out[i] = 0;
     while (num_bits--) {
         irq_disable();
-        gpio_out_toggle_noirq(clk);
+        for (uint8_t i = 0; i < n; i++)
+            gpio_out_toggle_noirq(h->clks[i]);
         hx711s_delay_noirq();
-        gpio_out_toggle_noirq(clk);
-        uint_fast8_t bit = gpio_in_read(dout);
+        for (uint8_t i = 0; i < n; i++)
+            gpio_out_toggle_noirq(h->clks[i]);
+        for (uint8_t i = 0; i < n; i++)
+            bits_out[i] = (bits_out[i] << 1) | gpio_in_read(h->sdos[i]);
         irq_enable();
         hx711s_delay();
-        bits_read = (bits_read << 1) | bit;
     }
-    return bits_read;
 }
 
 
@@ -140,16 +146,16 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     uint_fast8_t gain_channel = h->gain_channel;
     uint_fast8_t extras_mask = (1 << gain_channel) - 1;
     int32_t counts_buf[MAX_SENSORS];
+    uint32_t adc[MAX_SENSORS];
 
-    // Read all sensors sequentially; they update simultaneously via shared RATE
+    hx711s_raw_read(h, adc, 24 + gain_channel);
+
     for (uint8_t i = 0; i < h->sensor_count; i++) {
-        uint32_t adc = hx711s_raw_read(h->sdos[i], h->clks[i],
-                                        24 + gain_channel);
-        uint32_t raw = adc >> gain_channel;
+        uint32_t raw = adc[i] >> gain_channel;
         if (raw & 0x800000)
             raw |= 0xFF000000;
         counts_buf[i] = (int32_t)raw;
-        if ((adc & extras_mask) != extras_mask)
+        if ((adc[i] & extras_mask) != extras_mask)
             h->last_error = SAMPLE_ERROR_DESYNC;
     }
 
