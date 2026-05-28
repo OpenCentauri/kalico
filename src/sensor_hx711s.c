@@ -246,8 +246,11 @@ command_query_hx711s(uint32_t *args)
     for (uint8_t i = 0; i < h->sensor_count; i++)
         gpio_out_write(h->clks[i], 0); // wake all chips
     sensor_bulk_reset(&h->sb);
+    // HX711 needs up to ~400ms (typ. 10-20ms) to settle after PD release.
+    // Wait 50ms before first poll so the first DRDY isn't from a still-
+    // stabilising chip (which can produce a spurious DESYNC).
     irq_disable();
-    h->timer.waketime = timer_read_time() + h->rest_ticks;
+    h->timer.waketime = timer_read_time() + timer_from_us(50000);
     sched_add_timer(&h->timer);
     irq_enable();
 }
