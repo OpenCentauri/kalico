@@ -19,11 +19,13 @@
 #define BYTES_PER_SAMPLE 4
 #define SAMPLE_ERROR_DESYNC (1L << 31)
 #define SAMPLE_ERROR_READ_TOO_LONG (1L << 30)
+#define SAMPLE_ERROR_TORN_READ (1L << 29)
 #define HX711S_OVERFLOW (1 << 1)
 
 struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
+    uint32_t last_error;
     uint8_t pending_flag;
     uint8_t sensor_count;
     uint8_t gain_channel;   // extra clock pulses: chip type + gain selection
@@ -148,7 +150,22 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     uint32_t adc[MAX_SENSORS];
     uint32_t sample_error = 0;
 
+    // The chips free-run on independent oscillators, so a chip may latch a
+    // new conversion into its output register between the data-ready poll
+    // and this read, or during the read itself. Bits clocked out across a
+    // latch are torn (often all-ones) with no other error signature.
+    // Detect this by verifying every DOUT is still low immediately before
+    // the read and back high immediately after; a low DOUT after the read
+    // means that chip latched new data mid-read.
+    uint32_t torn_read = !hx711s_is_data_ready(h);
+
     hx711s_raw_read(h, adc, 24 + gain_channel);
+
+    hx711s_delay();
+    for (uint8_t i = 0; i < h->sensor_count; i++) {
+        if (!gpio_in_read(h->sdos[i]))
+            torn_read = 1;
+    }
 
     for (uint8_t i = 0; i < h->sensor_count; i++) {
         uint32_t raw = adc[i] >> gain_channel;
@@ -167,6 +184,20 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
 
     if (flags & HX711S_OVERFLOW)
         sample_error = SAMPLE_ERROR_READ_TOO_LONG;
+
+    // Torn reads are a normal consequence of chip oscillator drift: discard
+    // just that sample, the next conversion is valid. They can also corrupt
+    // the extra-bit check, so they must take priority over a desync. A real
+    // desync corrupts the serial protocol state, making all further values
+    // unreliable until the chips are power cycled: latch it and keep
+    // reporting it so the host restarts the sensor.
+    if (torn_read)
+        sample_error = SAMPLE_ERROR_TORN_READ;
+    else if (sample_error)
+        h->last_error = sample_error;
+
+    if (h->last_error)
+        sample_error = h->last_error;
 
     if (sample_error) {
         for (uint8_t i = 0; i < h->sensor_count; i++)
@@ -237,6 +268,7 @@ command_query_hx711s(uint32_t *args)
     struct hx711s_adc *h = oid_lookup(oid, command_config_hx711s);
     sched_del_timer(&h->timer);
     h->pending_flag = 0;
+    h->last_error = 0;
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         for (uint8_t i = 0; i < h->sensor_count; i++)
