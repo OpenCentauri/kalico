@@ -15,6 +15,7 @@ from .interfaces import BulkAdcData, BulkAdcDataCallback, LoadCellSensor
 UPDATE_INTERVAL = 0.10
 SAMPLE_ERROR_DESYNC = -0x80000000
 SAMPLE_ERROR_READ_TOO_LONG = 0x40000000
+SAMPLE_ERROR_TORN_READ = 0x20000000
 ADC_FACTOR = 1.0 / (1 << 23)
 
 
@@ -33,6 +34,7 @@ class HX711SBase(LoadCellSensor):
         self.sensor_type = sensor_type
         self.last_error_count = 0
         self.consecutive_fails = 0
+        self.torn_read_count = 0
 
         ppins = self.printer.lookup_object("pins")
         sdo_pin_names = [p.strip() for p in config.get("sdo_pins").split(",")]
@@ -138,14 +140,19 @@ class HX711SBase(LoadCellSensor):
             ptime = sample[0]
             channel_counts = sample[1:]
             val = channel_counts[0]
-            if val == SAMPLE_ERROR_DESYNC:
+            if val == SAMPLE_ERROR_TORN_READ:
+                # a chip latched new data mid-read; sample dropped by the MCU
+                self.torn_read_count += 1
+                logging.info("%s: torn read at t=%.3f", self.name, ptime)
+                continue
+            elif val == SAMPLE_ERROR_DESYNC:
                 self.last_error_count += 1
                 logging.error("%s: DESYNC at t=%.3f", self.name, ptime)
-                continue
+                break  # errors latch in the MCU, the rest are duplicates
             elif val == SAMPLE_ERROR_READ_TOO_LONG:
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
-                continue
+                break  # errors latch in the MCU, the rest are duplicates
             converted = [round(ptime, 6)]
             for ch in channel_counts:
                 converted.append(ch)
@@ -182,13 +189,19 @@ class HX711SBase(LoadCellSensor):
         self._convert_samples(samples)
         overflows = self.ffreader.get_last_overflows() - prev_overflows
         errors = self.last_error_count - prev_error_count
-        if errors > 0 or overflows > 0:
+        if errors > 0:
+            # a read error desyncs the chips and may corrupt their gain
+            # setting; only a power cycle restores a known state
+            logging.error(
+                "%s: forced sensor restart due to read error", self.name
+            )
+            self._finish_measurements()
+            self._start_measurements()
+        elif overflows > 0:
             self.consecutive_fails += 1
             if self.consecutive_fails > 4:
                 logging.error(
-                    "%s: forced sensor restart (errors=%i, overflows=%i"
-                    " over %i batches)",
-                    self.name, errors, overflows, self.consecutive_fails,
+                    "%s: forced sensor restart due to overflows", self.name
                 )
                 self._finish_measurements()
                 self._start_measurements()
