@@ -5,6 +5,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from typing import Optional, Union
 
@@ -12,6 +13,93 @@ from klippy.mcu import MCU
 
 MAX_INT32 = 2**31
 MIN_INT32 = -(2**31) - 1
+
+
+# Minimal reimplementations of scipy.signal functions using only Python math.
+# Avoids the scipy dependency which is too large for the target rootfs.
+# numpy is NOT required; all arithmetic is pure Python.
+
+
+def _butter_sos(order, Wn, btype, fs):
+    """Butterworth IIR filter in SOS format (replaces scipy.signal.butter).
+
+    Returns a list of SOS sections (each a 6-element list
+    [b0,b1,b2,1,a1,a2]).  Gain is normalised to 1 at DC (lowpass) or
+    Nyquist (highpass) by construction — no extra scaling required.
+    """
+    K = math.tan(math.pi * Wn / fs)  # pre-warped frequency ratio
+    sections = []
+    # Complex-conjugate pole pairs
+    for k in range(1, order // 2 + 1):
+        theta = math.pi * (2 * k + order - 1) / (2 * order)
+        cos_t = math.cos(theta)
+        D = 1.0 - 2.0 * K * cos_t + K * K
+        a1 = 2.0 * (K * K - 1.0) / D
+        a2 = (1.0 + 2.0 * K * cos_t + K * K) / D
+        if btype == "lowpass":
+            k2 = K * K / D
+            sections.append([k2, 2.0 * k2, k2, 1.0, a1, a2])
+        else:  # highpass
+            inv_D = 1.0 / D
+            sections.append([inv_D, -2.0 * inv_D, inv_D, 1.0, a1, a2])
+    # Real pole for odd order
+    if order % 2 == 1:
+        a1_r = -(1.0 - K) / (1.0 + K)
+        if btype == "lowpass":
+            kk = K / (1.0 + K)
+            sections.append([kk, kk, 0.0, 1.0, a1_r, 0.0])
+        else:  # highpass
+            inv_k1 = 1.0 / (1.0 + K)
+            sections.append([inv_k1, -inv_k1, 0.0, 1.0, a1_r, 0.0])
+    return sections
+
+
+def _iirnotch_ba(freq, Q, fs):
+    """Second-order IIR notch filter (replaces scipy.signal.iirnotch).
+
+    Returns (b, a) transfer function coefficients normalised so the
+    DC gain is 1.  Without this normalisation the passband gain error
+    can reach ~20 % for typical load-cell parameters.
+    """
+    w0 = 2.0 * math.pi * freq / fs
+    r = 1.0 - (w0 / Q) / 2.0  # pole radius; -3 dB BW ≈ w0/Q
+    cos_w0 = math.cos(w0)
+    b = [1.0, -2.0 * cos_w0, 1.0]
+    a = [1.0, -2.0 * r * cos_w0, r * r]
+    dc_gain = (b[0] + b[1] + b[2]) / (a[0] + a[1] + a[2])
+    b = [x / dc_gain for x in b]
+    return b, a
+
+
+def _tf2sos_single(b, a):
+    """Convert a 2nd-order transfer function to one SOS section
+    (replaces scipy.signal.tf2sos for the single-section case).
+    """
+    a0 = a[0]
+    return [b[0] / a0, b[1] / a0, b[2] / a0, 1.0, a[1] / a0, a[2] / a0]
+
+
+def _sosfilt_zi_sections(sections):
+    """Steady-state initial conditions for an SOS cascade
+    (replaces scipy.signal.sosfilt_zi).
+
+    Derived from the transposed direct-form II state equations at DC
+    equilibrium, with cascading DC-gain scaling between sections.
+    """
+    zi = []
+    scale = 1.0
+    for sec in sections:
+        b0, b1, b2 = sec[0], sec[1], sec[2]
+        a1, a2 = sec[4], sec[5]  # sec[3] is always 1.0
+        denom = 1.0 + a1 + a2
+        zi.append(
+            [
+                scale * (b1 + b2 - (a1 + a2) * b0) / denom,
+                scale * (b2 * (1.0 + a1) - a2 * (b0 + b1)) / denom,
+            ]
+        )
+        scale *= (b0 + b1 + b2) / denom  # DC gain of this section
+    return zi
 
 
 def assert_is_int32(value: int, error: str) -> int:
@@ -44,42 +132,27 @@ class DigitalFilter:
         self.filter_sections: list = []
         self.initial_state: list = []
         self.sample_frequency: float = float(sps)
-        # an empty filter can be created without SciPi/numpy
         if not (highpass or lowpass or notches):
             return
-        try:
-            import scipy.signal as signal
-        except:
-            raise cfg_error("DigitalFilter requires the SciPy module")
         if highpass:
-            self.filter_sections.append(
+            self.filter_sections.extend(
                 self._butter(highpass, "highpass", highpass_order)
             )
         if lowpass:
-            self.filter_sections.append(
+            self.filter_sections.extend(
                 self._butter(lowpass, "lowpass", lowpass_order)
             )
-        for notch_freq in notches:
+        for notch_freq in (notches or []):
             self.filter_sections.append(self._notch(notch_freq, notch_quality))
         if len(self.filter_sections) > 0:
-            self.initial_state = signal.sosfilt_zi(self.filter_sections)
+            self.initial_state = _sosfilt_zi_sections(self.filter_sections)
 
     def _butter(self, frequency: float, btype, order: int):
-        import scipy.signal as signal
-
-        return signal.butter(
-            order,
-            Wn=frequency,
-            btype=btype,
-            fs=self.sample_frequency,
-            output="sos",
-        )[0]
+        return _butter_sos(order, frequency, btype, self.sample_frequency)
 
     def _notch(self, freq, quality):
-        import scipy.signal as signal
-
-        b, a = signal.iirnotch(freq, Q=quality, fs=self.sample_frequency)
-        return signal.tf2sos(b, a)[0]
+        b, a = _iirnotch_ba(freq, quality, self.sample_frequency)
+        return _tf2sos_single(b, a)
 
     def get_filter_sections(self):
         return self.filter_sections

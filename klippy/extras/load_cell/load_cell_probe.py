@@ -262,11 +262,12 @@ class ContinuousTareFilterHelper:
         self._drift_delay_param = intParamHelper(
             config, "drift_filter_delay", default=2, minval=1, maxval=2
         )
+        _drift_val = self._drift_param.value or 0.0
         self._buzz_param = floatParamHelper(
             config,
             "buzz_filter_cutoff_frequency",
             default=None,
-            above=min(80.0, max_filter_frequency - 1.0),
+            above=_drift_val,
             below=max_filter_frequency,
         )
         self._buzz_delay_param = intParamHelper(
