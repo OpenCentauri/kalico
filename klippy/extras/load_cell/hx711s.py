@@ -35,6 +35,9 @@ class HX711SBase(LoadCellSensor):
         self.last_error_count = 0
         self.consecutive_fails = 0
         self.torn_read_count = 0
+        # last valid per-channel counts, held across torn reads to keep the
+        # sample stream gap-free (see _convert_samples)
+        self._last_channel_counts = None
 
         ppins = self.printer.lookup_object("pins")
         sdo_pin_names = [p.strip() for p in config.get("sdo_pins").split(",")]
@@ -141,10 +144,17 @@ class HX711SBase(LoadCellSensor):
             channel_counts = sample[1:]
             val = channel_counts[0]
             if val == SAMPLE_ERROR_TORN_READ:
-                # a chip latched new data mid-read; sample dropped by the MCU
+                # A chip latched new data mid-read; the MCU flagged it. Hold
+                # the last valid reading in its place rather than dropping the
+                # sample, so the stream stays gap-free and uniformly spaced
+                # for downstream consumers (tap analysis decomposes the force
+                # curve by index and is fragile to missing points). The held
+                # value is within one sample period of the true force, so it
+                # cannot cause a false probe trigger.
                 self.torn_read_count += 1
-                logging.info("%s: torn read at t=%.3f", self.name, ptime)
-                continue
+                if self._last_channel_counts is None:
+                    continue  # nothing to hold yet; drop the leading torn read
+                channel_counts = self._last_channel_counts
             elif val == SAMPLE_ERROR_DESYNC:
                 self.last_error_count += 1
                 logging.error("%s: DESYNC at t=%.3f", self.name, ptime)
@@ -153,6 +163,8 @@ class HX711SBase(LoadCellSensor):
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
                 break  # errors latch in the MCU, the rest are duplicates
+            else:
+                self._last_channel_counts = channel_counts
             converted = [round(ptime, 6)]
             for ch in channel_counts:
                 converted.append(ch)
@@ -164,6 +176,8 @@ class HX711SBase(LoadCellSensor):
     def _start_measurements(self):
         self.consecutive_fails = 0
         self.last_error_count = 0
+        # discard any held value from a prior (now power-cycled) stream
+        self._last_channel_counts = None
         rest_ticks = self.mcu.seconds_to_clock(
             1.0 / (10.0 * self.get_samples_per_second())
         )
