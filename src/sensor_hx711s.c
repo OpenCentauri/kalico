@@ -22,10 +22,18 @@
 #define SAMPLE_ERROR_TORN_READ (1L << 29)
 #define HX711S_OVERFLOW (1 << 1)
 
+// A corrupt chip frame can pass the framing checks yet carry a value
+// hundreds of thousands of counts from the truth. Real contact force moves
+// the summed counts by well under this between samples (a 2mm/s approach at
+// 80 SPS), so a larger single-sample jump is a glitch, not a load change.
+#define SPIKE_SUM_THRESHOLD 200000
+
 struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
     uint32_t last_error;
+    int32_t last_good_sum;  // summed counts of the last non-glitch sample
+    uint8_t have_last_sum;  // false until the first good sum is seen
     uint8_t pending_flag;
     uint8_t sensor_count;
     uint8_t gain_channel;   // extra clock pulses: chip type + gain selection
@@ -208,8 +216,20 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             append_sample(h, counts_buf[i]);
             sum += counts_buf[i];
         }
-        if (h->lce)
-            load_cell_probe_report_sample(h->lce, sum);
+        // Reject single-sample glitches that pass framing but jump
+        // implausibly far from the last good reading - these would
+        // otherwise fire a false probe trigger. Only the trigger is
+        // suppressed; the raw value still went into the bulk buffer above
+        // so the host can see and hold it (and log which chip glitched).
+        int32_t jump = sum - h->last_good_sum;
+        if (jump < 0)
+            jump = -jump;
+        if (!h->have_last_sum || jump <= SPIKE_SUM_THRESHOLD) {
+            h->last_good_sum = sum;
+            h->have_last_sum = 1;
+            if (h->lce)
+                load_cell_probe_report_sample(h->lce, sum);
+        }
     }
 
     // Flush buffer if another sample would overflow it
@@ -269,6 +289,7 @@ command_query_hx711s(uint32_t *args)
     sched_del_timer(&h->timer);
     h->pending_flag = 0;
     h->last_error = 0;
+    h->have_last_sum = 0;
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         for (uint8_t i = 0; i < h->sensor_count; i++)

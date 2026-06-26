@@ -17,6 +17,10 @@ SAMPLE_ERROR_DESYNC = -0x80000000
 SAMPLE_ERROR_READ_TOO_LONG = 0x40000000
 SAMPLE_ERROR_TORN_READ = 0x20000000
 ADC_FACTOR = 1.0 / (1 << 23)
+# A corrupt chip frame can pass framing yet sit hundreds of thousands of
+# counts from the truth. A single chip's reading moves by well under this
+# between samples during a probe, so a larger one-sample jump is a glitch.
+CHANNEL_SPIKE_THRESHOLD = 100000
 
 
 class HX711SBase(LoadCellSensor):
@@ -35,8 +39,9 @@ class HX711SBase(LoadCellSensor):
         self.last_error_count = 0
         self.consecutive_fails = 0
         self.torn_read_count = 0
-        # last valid per-channel counts, held across torn reads to keep the
-        # sample stream gap-free (see _convert_samples)
+        self.spike_count = 0
+        # last valid per-channel counts, held across torn reads and glitches
+        # to keep the sample stream gap-free (see _convert_samples)
         self._last_channel_counts = None
 
         ppins = self.printer.lookup_object("pins")
@@ -137,6 +142,27 @@ class HX711SBase(LoadCellSensor):
     def attach_load_cell_probe(self, load_cell_probe_oid: int):
         self.attach_probe_cmd.send([self.oid, load_cell_probe_oid])
 
+    # True if any channel jumped implausibly far from the last good sample.
+    # Logs which channel(s) glitched so the offending chip can be identified.
+    def _is_glitch(self, channel_counts, ptime):
+        last = self._last_channel_counts
+        if last is None:
+            return False
+        bad = [
+            i
+            for i, (c, p) in enumerate(zip(channel_counts, last))
+            if abs(c - p) > CHANNEL_SPIKE_THRESHOLD
+        ]
+        if not bad:
+            return False
+        self.spike_count += 1
+        logging.warning(
+            "%s: glitch dropped at t=%.3f; channel(s) %s jumped"
+            " (now=%s last=%s)",
+            self.name, ptime, bad, list(channel_counts), list(last),
+        )
+        return True
+
     def _convert_samples(self, samples):
         count = 0
         for sample in samples:
@@ -163,6 +189,10 @@ class HX711SBase(LoadCellSensor):
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
                 break  # errors latch in the MCU, the rest are duplicates
+            elif self._is_glitch(channel_counts, ptime):
+                # corrupt frame that passed framing; hold the last good
+                # reading so the curve stays clean for tap analysis
+                channel_counts = self._last_channel_counts
             else:
                 self._last_channel_counts = channel_counts
             converted = [round(ptime, 6)]
