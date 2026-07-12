@@ -22,9 +22,21 @@
 #define RPMSG_NS_CREATE         0
 #define RPMSG_NS_DESTROY        1
 
-// Vring configuration — must match resource table and device tree
-#define RPMSG_VRING_ALIGN       4096
-#define RPMSG_NUM_BUFS          32      // Number of buffers per direction
+// Shared-memory placement — must match resource table and device tree.
+//
+// All RPMsg shared memory (vrings + message buffers) lives in SRAM A1
+// (32 KiB @ 0x00020000). SRAM A1 is visible to ARM and DSP at the same
+// address and is uncached on both sides (DSP region 0 keeps the
+// reset-default bypass attribute), so there are no coherency concerns.
+//
+// SRAM A1 layout (totals exactly 32 KiB):
+//   vring0  @ 0x20000, 4 KiB   (Linux PAGE_ALIGNs vring_size(16, 256))
+//   vring1  @ 0x21000, 4 KiB
+//   buffers @ 0x22000, 20 KiB  (Linux allocates num*2*512 = 16 KiB)
+//   trace   @ 0x27000, 4 KiB   (.trace_buf, placed by hifi4.ld)
+//
+// The Linux DTS reserved-memory nodes (vdev0vring0/1, vdev0buffer,
+// dsp_trace) must match these addresses/sizes.
 
 // Vring addresses
 //
@@ -34,8 +46,10 @@
 //   vring1 = svq = Linux's send queue, Linux puts messages here
 //            DSP's RX: read messages from available ring
 //
-#define VRING_TX_ADDR   0x42140000  // RX: Linux → DSP
-#define VRING_RX_ADDR   0x42142000  // TX: DSP → Linux
+#define RPMSG_VRING_ALIGN       256
+#define RPMSG_NUM_BUFS          16      // Number of buffers per direction
+#define VRING_TX_ADDR   0x00020000  // vring0: DSP → Linux
+#define VRING_RX_ADDR   0x00021000  // vring1: Linux → DSP
 
 /*
  * RPMsg message header — prepended to every message.
@@ -169,7 +183,7 @@ uint16_t rpmsg_tx_avail_idx(void);
 /*
  * Resynchronize vring tracking indices after a warm restart.
  *
- * After a soft reset, the shared vring memory in DDR is still valid
+ * After a soft reset, the shared vring memory in SRAM A1 is still valid
  * but the DSP's local tracking indices were lost. This function
  * restores them from the vring state so the DSP stays in sync
  * with Linux:
