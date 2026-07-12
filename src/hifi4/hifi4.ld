@@ -2,11 +2,10 @@ ENTRY(_ResetVector)
 
 MEMORY
 {
-    iram0 (rx)  : ORIGIN = 0x00400000, LENGTH = 0x00010000
-    dram0 (rw)  : ORIGIN = 0x00420000, LENGTH = 0x00008000
-    dram1 (rw)  : ORIGIN = 0x00440000, LENGTH = 0x00008000
-    ddr1  (rwx) : ORIGIN = 0x32000000, LENGTH = 0x00100000
-    sram  (rw)  : ORIGIN = 0x00020000, LENGTH = 0x00008000
+    iram0 (rx)      : ORIGIN = 0x00400000, LENGTH = 0x00010000
+    dram0 (rw)      : ORIGIN = 0x00420000, LENGTH = 0x00008000
+    dram1 (rw)      : ORIGIN = 0x00440000, LENGTH = 0x00008000
+    sram_trace (rw) : ORIGIN = 0x00027000, LENGTH = 0x00001000
 }
 
 PHDRS
@@ -15,7 +14,6 @@ PHDRS
     rodata_phdr PT_LOAD;
     dram0_phdr PT_LOAD;
     dram1_phdr PT_LOAD;
-    ddr1_phdr  PT_LOAD;
 }
 
 PROVIDE(_memmap_reset_vector = 0x00400660);
@@ -32,7 +30,7 @@ SECTIONS
         _trace_buf_start = .;
         KEEP(*(.trace_buf))
         _trace_buf_end = .;
-    } > ddr1 :NONE
+    } > sram_trace :NONE
 
     ._xt_int_enter.literal : ALIGN(4) {
         *(._xt_int_enter.literal)
@@ -131,7 +129,7 @@ SECTIONS
         _heap_end = ABSOLUTE(.);
     } > dram1 :NONE
 
-    /* Reserve space for stack at end of DDR - MOVED AFTER HEAP */
+    /* Reserve space for stack in DRAM1, after the heap */
     .stack (NOLOAD) : ALIGN(16) {
         . = . + 0x1000;  /* 4 KB stack */
         _stack_end = ABSOLUTE(.);
