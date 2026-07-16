@@ -29,6 +29,7 @@ reference_tare_counts: 12345
   * [`ads1220`](Config_Reference.md#ads1220)
   * [`ads131m02`](Config_Reference.md#ads131m02)
   * [`ads131m04`](Config_Reference.md#ads131m04)
+  * [`cs1237`](Config_Reference.md#cs1237)
 
 - `counts_per_gram: 245`\
   _Default Value: None_\
@@ -481,7 +482,7 @@ The classifier uses ratio metrics to make it more transferable between different
 | Departure Force                | The change in force in the departure line over the compression force. This is expected to be close to 0.                                                                          | The nozzle should be in free air during this move, so any distortions are usually due to ooze pulling on the nozzle.    |
 | Baseline Force                 | The difference in force between the point where the nozzle makes contact with the bed and where is breaks contact, over the compression force. This is expected to be close to 0. | You expect a scale to read zero when you take the weight off. Large differences mean an unexpected force was applied.   |
 | Dwell Force Drop               | The drop in force during the dwell over the compression force.                                                                                                                    | While some drop is not unusual, large drops are associated with plastic oozing out from between the nozzle and the bed. |
-| Normalized Decompression Angle | How closely the slope of the decompression line matches the ideal decompression slope.  Normalized as `(actual - expected) / expected`                                            | Ooze can pull on the nozzle, changing the slope. This ruins the accuracy of the measurement.                            |
+| Normalized Decompression Angle | How closely the slope of the decompression line matches the ideal decompression slope.  Normalized as `(actual - expected) / expected`                                            | Ooze can pull on the nozzle, changing the slope. This ruins the accuracy of the measurement.                           |
 
 These factors are all combined to give the final quality score. The only component that has to be measured on the printer is the **Normalized Decompression Angle**. This can be automatically set with [Decompression Angle Calibration](#decompression-angle-calibration). Until this is angle is set the tap quality classifier is off.
 
@@ -600,4 +601,45 @@ counts_per_gram: 490
 reference_tare_counts: 24690
 trigger_force: 75
 z_offset: 0.0
+```
+
+### CS1237 Notes
+
+The CS1237 is a 24-bit sigma-delta ADC with an integrated PGA, designed as a low-cost alternative to the HX711/HX717 family. It is a drop-in replacement in config — swap `sensor_type: hx711` for `sensor_type: cs1237` and rename `dout_pin` to `drdy_pin`. All calibration, tap validation, and probe logic is identical.
+
+**Key differences vs HX711/HX717:**
+- The data pin is named `drdy_pin` (data-ready, active-low), not `dout_pin`. It doubles as the serial data line per the CS1237 protocol.
+- Sample rates are `10 | 40 | 640 | 1280` SPS, defaulting to `40`. Use `640` or `1280` SPS for probing to match HX717 performance.
+- Gain options are `1 | 2 | 64 | 128`, defaulting to `128` (equivalent to HX711 channel A 128× gain).
+- Like HX711/HX717, communication is bit-bang GPIO, not SPI, so MCU overhead is similar.
+- Cannot communicate reset events to the MCU.
+
+**Switching from HX711 to CS1237:**
+
+```ini
+# Old (HX711 board):
+[load_cell]
+sensor_type: hx711
+dout_pin: PA1
+sclk_pin: PA2
+sample_rate: 80
+gain: A-128
+
+# New (CS1237 board):
+[load_cell]
+sensor_type: cs1237
+drdy_pin: PA1
+sclk_pin: PA2
+sample_rate: 40
+gain: 128
+```
+
+**Probing recommendation:**
+Set `sample_rate: 640` or `sample_rate: 1280` for probing applications. The default `40` SPS is suitable for scale use but will cause excessive overshoot force at normal probing speeds. The CS1237's higher maximum rate (1280 SPS) makes it capable of matching or exceeding HX717 probing performance.
+
+**Wiring note:**
+The DRDY/DOUT pin is open-drain on the CS1237. Use the MCU's internal pull-up (`^`) on `drdy_pin` in your config:
+
+```ini
+drdy_pin: ^PA1
 ```
