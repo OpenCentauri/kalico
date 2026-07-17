@@ -1,0 +1,4 @@
+# Tests for CS1237 load-cell support
+DICTIONARY stm32f405.dict
+CONFIG cs1237.cfg
+G4 P1000
