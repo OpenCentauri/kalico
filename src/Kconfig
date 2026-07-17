@@ -180,7 +180,7 @@ config WANT_HX71X
 config WANT_CS1237
     bool
     depends on HAVE_GPIO
-    default y
+    default n
 config WANT_HX711S
     bool
     depends on HAVE_GPIO
@@ -299,6 +299,7 @@ config WANT_HX71X
 config WANT_CS1237
     bool "Support CS1237 ADC chip"
     depends on HAVE_GPIO
+    default n
 config WANT_HX711S
     bool "Support multi-sensor HX711 and HX717 ADC chips"
     depends on HAVE_GPIO
