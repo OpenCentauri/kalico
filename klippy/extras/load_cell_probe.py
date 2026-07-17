@@ -3,7 +3,13 @@
 # Copyright (C) 2025  Gareth Farrington <gareth@waves.ky>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-from klippy.extras.load_cell import ads131m0x, ads1220, hx71x, hx711s
+from klippy.extras.load_cell import (
+    ads131m0x,
+    ads1220,
+    cs1237,
+    hx71x,
+    hx711s,
+)
 from klippy.extras.load_cell.load_cell_probe import LoadCellPrinterProbe
 from klippy.extras.load_cell.tap_analysis import TapClassifierModule
 from klippy.extras.load_cell.tap_quality_classifier import TapQualityClassifier
@@ -17,6 +23,7 @@ def register_components(subsystem: SubsystemComponentCollection):
         | ads1220.ADS1220_SENSOR_TYPE
         | ads131m0x.ADS131M0X_SENSOR_TYPES
         | hx711s.HX711S_SENSOR_TYPES
+        | cs1237.CS1237_SENSOR_TYPES
     )
     for name, sensor in sensors.items():
         subsystem.register_component("load_cell_probe_sensors", name, sensor)
