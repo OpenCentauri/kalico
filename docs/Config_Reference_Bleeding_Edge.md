@@ -64,6 +64,33 @@ smoother_freq_y: 0
 #   Note: Damping ratios are not currently supported for input smoothers.
 ```
 
+## Resonance tester — Rust backend
+
+### [resonance_tester]
+
+The following options extend the standard
+[`[resonance_tester]`](Config_Reference.md#resonance_tester) section.
+See [Measuring Resonances — Using the Rust backend](Measuring_Resonances.md#using-the-rust-backend)
+for prerequisites and usage.
+
+```
+[resonance_tester]
+#calibration_backend: numpy
+#   Selects the backend used for shaper calibration.
+#   "numpy" (default) uses the built-in Python/numpy path.
+#   "rusty" delegates to librusty_shaper.so via ctypes, skipping the
+#   numpy dependency entirely. Requires librusty_shaper.so to be
+#   installed (see Measuring_Resonances.md). This value is persisted
+#   by SAVE_CONFIG when changed via the BACKEND= GCode parameter.
+#calibration_shapers:
+#   Optional comma-separated list of input shaper names to evaluate
+#   when calibration_backend is "rusty". When omitted the Rust binary
+#   evaluates all built-in shapers (zv, mzv, ei, 2hump_ei, 3hump_ei).
+#   Example: calibration_shapers: mzv,ei,2hump_ei
+#   This value is persisted by SAVE_CONFIG when changed via the
+#   SHAPERS= GCode parameter.
+```
+
 ## Test print utilities
 
 ### [ringing_test]

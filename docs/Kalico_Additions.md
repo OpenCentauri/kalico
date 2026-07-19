@@ -23,6 +23,21 @@
 - [`BED_MESH_CHECK`](./G-Codes.md#bed_mesh_check) validates the current bed mesh against specified criteria, allowing you to check maximum deviation and slope between adjacent points before printing.
 - [`[resonance_tester]`](./Config_Reference.md#resonance_tester) now supports multiple accelerometer chips via the new `accel_chips` parameter, allowing data from multiple accelerometers to be combined for more accurate input shaper calibration.
 
+## Resonance Calibration
+
+`[resonance_tester]` now supports a native Rust calibration backend via
+[`rusty-shaper`](https://github.com/OpenCentauri/OpenCentauri/tree/paul/nightly/rusty-shaper).
+The Rust backend skips the numpy dependency entirely, making it well-suited
+for resource-constrained hosts such as those based on the Allwinner R528.
+
+- [`calibration_backend`](./Config_Reference_Bleeding_Edge.md#resonance_tester-rust-backend) —
+  set to `rusty` to use `librusty_shaper.so` instead of numpy for shaper selection
+- [`calibration_shapers`](./Config_Reference_Bleeding_Edge.md#resonance_tester-rust-backend) —
+  optional comma-separated list of shapers to evaluate (default: all)
+- Both options are persisted by `SAVE_CONFIG` when written via `SHAPER_CALIBRATE`
+- See [Measuring Resonances — Using the Rust backend](./Measuring_Resonances.md#using-the-rust-backend)
+  for installation and GCode usage
+
 ## New Kalico Modules
 
 - [gcode_shell_command](./G-Code_Shell_Command.md) - Execute linux commands and scripts from within Kalico
