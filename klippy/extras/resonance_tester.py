@@ -57,8 +57,6 @@ def _parse_axis(gcmd, raw_axis):
 
 @contextmanager
 def suspend_limits(printer, max_accel, max_velocity, input_shaping):
-    # Override maximum acceleration and cruise ratio
-    # based on the maximum test frequency
     gcode = printer.lookup_object("gcode")
     input_shaper = printer.lookup_object("input_shaper", None)
     if input_shaper is not None and not input_shaping:
@@ -79,16 +77,10 @@ def suspend_limits(printer, max_accel, max_velocity, input_shaping):
     kin = toolhead.get_kinematics()
     old_max_velocities = getattr(kin, "max_velocities", None)
     if old_max_velocities is not None:
-        kin.max_velocities = [
-            max_velocity,
-            max_velocity,
-            old_max_velocities[-1],
-        ]
+        kin.max_velocities = [max_velocity, max_velocity, old_max_velocities[-1]]
     old_max_accels = getattr(kin, "max_accels", None)
     if old_max_accels is not None:
         kin.max_accels = [max_accel, max_accel, old_max_accels[-1]]
-    # FIXME: could be cleaner if limited_corexy were using the same format than
-    # limited_cartesian
     old_max_x_accel = getattr(kin, "max_x_accel", None)
     if old_max_x_accel is not None:
         kin.max_x_accel = max_accel
@@ -101,11 +93,9 @@ def suspend_limits(printer, max_accel, max_velocity, input_shaping):
     try:
         yield
     finally:
-        # Restore input shaper if it was disabled for resonance testing
         if input_shaper is not None:
             input_shaper.enable_shaping()
             gcode.respond_info("Re-enabled [input_shaper]")
-        # Restore the original acceleration values
         gcode.run_script_from_command(
             "SET_VELOCITY_LIMIT ACCEL=%.3f MINIMUM_CRUISE_RATIO=%.3f VELOCITY=%.3f"
             % (old_max_accel, old_minimum_cruise_ratio, old_max_velocity)
@@ -125,7 +115,6 @@ def suspend_limits(printer, max_accel, max_velocity, input_shaping):
 class VibrationPulseTestGenerator:
     def __init__(self, config):
         self.min_freq = config.getfloat("min_freq", 5.0, minval=1.0)
-        # Defaults are such that max_freq * accel_per_hz == 10000 (max_accel)
         self.max_freq = config.getfloat(
             "max_freq", 135.0, minval=self.min_freq, maxval=300.0
         )
@@ -135,9 +124,7 @@ class VibrationPulseTestGenerator:
         )
 
     def prepare_test(self, gcmd):
-        self.freq_start = gcmd.get_float(
-            "FREQ_START", self.min_freq, minval=1.0
-        )
+        self.freq_start = gcmd.get_float("FREQ_START", self.min_freq, minval=1.0)
         self.freq_end = gcmd.get_float(
             "FREQ_END", self.max_freq, minval=self.freq_start, maxval=300.0
         )
@@ -174,12 +161,8 @@ class VibrationPulseTestGenerator:
 class SweepingVibrationsTestGenerator:
     def __init__(self, config):
         self.vibration_generator = VibrationPulseTestGenerator(config)
-        self.sweeping_accel = config.getfloat(
-            "sweeping_accel", 400.0, above=0.0
-        )
-        self.sweeping_period = config.getfloat(
-            "sweeping_period", 0.0, minval=0.0
-        )
+        self.sweeping_accel = config.getfloat("sweeping_accel", 400.0, above=0.0)
+        self.sweeping_period = config.getfloat("sweeping_period", 0.0, minval=0.0)
 
     def prepare_test(self, gcmd):
         self.vibration_generator.prepare_test(gcmd)
@@ -246,9 +229,7 @@ class ResonanceTestExecutor:
         for next_t, accel, freq in test_seq:
             t_seg = next_t - last_t
             toolhead.cmd_M204(
-                self.gcode.create_gcode_command(
-                    "M204", "M204", {"S": abs(accel)}
-                )
+                self.gcode.create_gcode_command("M204", "M204", {"S": abs(accel)})
             )
             v = last_v + accel * t_seg
             abs_v = abs(v)
@@ -264,7 +245,6 @@ class ResonanceTestExecutor:
             nY = Y + dY
             toolhead.limit_next_junction_speed(abs_last_v)
             if v * last_v < 0:
-                # The move first goes to a complete stop, then changes direction
                 d_decel = -last_v2 * half_inv_accel
                 decel_X, decel_Y = axis.get_point(d_decel)
                 toolhead.move([X + decel_X, Y + decel_Y, Z, E], abs_last_v)
@@ -282,11 +262,12 @@ class ResonanceTestExecutor:
             d_decel = -0.5 * last_v2 / old_max_accel
             decel_X, decel_Y = axis.get_point(d_decel)
             toolhead.cmd_M204(
-                self.gcode.create_gcode_command(
-                    "M204", "M204", {"S": old_max_accel}
-                )
+                self.gcode.create_gcode_command("M204", "M204", {"S": old_max_accel})
             )
             toolhead.move([X + decel_X, Y + decel_Y, Z, E], abs(last_v))
+
+
+VALID_BACKENDS = ("numpy", "rusty")
 
 
 class ResonanceTester:
@@ -296,14 +277,13 @@ class ResonanceTester:
         self.generator = SweepingVibrationsTestGenerator(config)
         self.executor = ResonanceTestExecutor(config)
 
+        # ── accelerometer chips ────────────────────────────────────────────────
         accel_chips = config.get("accel_chips", None)
         accel_chip = config.get("accel_chip", None)
         accel_chip_x = config.get("accel_chip_x", None)
         accel_chip_y = config.get("accel_chip_y", None)
 
-        # priority: accel_chips > accel_chip_x/y > accel_chip
         if accel_chips is not None:
-            # Parse comma-separated list of chips
             chip_names = [chip.strip() for chip in accel_chips.split(",")]
             self.accel_chip_names = [("xy", chip) for chip in chip_names]
         elif accel_chip_x is not None:
@@ -326,6 +306,16 @@ class ResonanceTester:
             "probe_points", seps=(",", "\n"), parser=float, count=3
         )
 
+        # ── calibration backend ───────────────────────────────────────────────
+        raw_backend = config.get("calibration_backend", "numpy").lower()
+        if raw_backend not in VALID_BACKENDS:
+            raise config.error(
+                "calibration_backend must be one of %s, got '%s'"
+                % (", ".join(VALID_BACKENDS), raw_backend)
+            )
+        self.calibration_backend = raw_backend
+
+        # ── gcode commands ──────────────────────────────────────────────────
         self.gcode = self.printer.lookup_object("gcode")
         self.gcode.register_command(
             "MEASURE_AXES_NOISE",
@@ -401,7 +391,6 @@ class ResonanceTester:
                         aclient = chip.start_internal_client()
                         raw_values.append((axis, aclient, chip.name))
 
-                # Generate moves
                 test_seq = self.generator.gen_test()
                 self.executor.run_test(
                     test_seq,
@@ -422,8 +411,7 @@ class ResonanceTester:
                         )
                         aclient.write_to_file(raw_name)
                         gcmd.respond_info(
-                            "Writing raw accelerometer data to "
-                            "%s file" % (raw_name,)
+                            "Writing raw accelerometer data to %s file" % (raw_name,)
                         )
                 if helper is None:
                     continue
@@ -451,10 +439,18 @@ class ResonanceTester:
     def _get_max_calibration_freq(self):
         return 1.5 * self.generator.get_max_freq()
 
-    cmd_TEST_RESONANCES_help = "Runs the resonance test for a specifed axis"
+    def _parse_shapers_param(self, gcmd):
+        """Parse optional SHAPERS= GCode param.  Returns a list of lowercase
+        shaper name strings, or None to use the backend default."""
+        raw = gcmd.get("SHAPERS", None)
+        if raw is None:
+            return None
+        names = [s.strip().lower() for s in raw.split(",") if s.strip()]
+        return names if names else None
+
+    cmd_TEST_RESONANCES_help = "Runs the resonance test for a specified axis"
 
     def cmd_TEST_RESONANCES(self, gcmd):
-        # Parse parameters
         axis = _parse_axis(gcmd, gcmd.get("AXIS").lower())
         chips_str = gcmd.get("CHIPS", None)
         test_point = gcmd.get("POINT", None)
@@ -492,9 +488,10 @@ class ResonanceTester:
         csv_output = "resonances" in outputs
         raw_output = "raw_data" in outputs
 
-        # Setup calculation of resonances
         if csv_output:
-            helper = shaper_calibrate.ShaperCalibrate(self.printer)
+            helper = shaper_calibrate.ShaperCalibrate(
+                self.printer, backend=self.calibration_backend
+            )
         else:
             helper = None
 
@@ -523,11 +520,10 @@ class ResonanceTester:
             )
 
     cmd_SHAPER_CALIBRATE_help = (
-        "Simular to TEST_RESONANCES but suggest input shaper config"
+        "Similar to TEST_RESONANCES but suggest input shaper config"
     )
 
     def cmd_SHAPER_CALIBRATE(self, gcmd):
-        # Parse parameters
         axis = gcmd.get("AXIS", None)
         if not axis:
             calibrate_axes = [TestAxis("x"), TestAxis("y")]
@@ -546,13 +542,22 @@ class ResonanceTester:
         if not self.is_valid_name_suffix(name_suffix):
             raise gcmd.error("Invalid NAME parameter")
 
+        # BACKEND= overrides the config-file default for this one run.
+        raw_backend = gcmd.get("BACKEND", self.calibration_backend).lower()
+        if raw_backend not in VALID_BACKENDS:
+            raise gcmd.error(
+                "BACKEND must be one of %s, got '%s'"
+                % (", ".join(VALID_BACKENDS), raw_backend)
+            )
+
+        # SHAPERS= overrides the shaper set for this run (both backends).
+        shapers_override = self._parse_shapers_param(gcmd)
+
         input_shaper = self.printer.lookup_object("input_shaper", None)
 
-        # Check for active fans and display warning if found
         self._check_active_fans(gcmd)
 
-        # Setup shaper calibration
-        helper = shaper_calibrate.ShaperCalibrate(self.printer)
+        helper = shaper_calibrate.ShaperCalibrate(self.printer, backend=raw_backend)
 
         calibration_data = self._run_test(
             gcmd, calibrate_axes, helper, accel_chips=accel_chips
@@ -576,6 +581,7 @@ class ResonanceTester:
                 max_smoothing=max_smoothing,
                 scv=scv,
                 max_freq=max_freq,
+                shapers=shapers_override,
                 logger=gcmd.respond_info,
             )
             gcmd.respond_info(
@@ -602,14 +608,21 @@ class ResonanceTester:
             gcmd.respond_info(
                 "Shaper calibration data written to %s file" % (csv_name,)
             )
+
+        # Persist backend and shapers override so SAVE_CONFIG writes them back.
+        configfile.set("resonance_tester", "calibration_backend", raw_backend)
+        if shapers_override:
+            configfile.set(
+                "resonance_tester", "calibration_shapers",
+                ",".join(shapers_override)
+            )
+
         gcmd.respond_info(
             "The SAVE_CONFIG command will update the printer config file\n"
             "with these parameters and restart the printer."
         )
 
-    cmd_MEASURE_AXES_NOISE_help = (
-        "Measures noise of all enabled accelerometer chips"
-    )
+    cmd_MEASURE_AXES_NOISE_help = "Measures noise of all enabled accelerometer chips"
 
     def cmd_MEASURE_AXES_NOISE(self, gcmd):
         meas_time = gcmd.get_float("MEAS_TIME", 2.0)
@@ -638,9 +651,7 @@ class ResonanceTester:
     def is_valid_name_suffix(self, name_suffix):
         return name_suffix.replace("-", "").replace("_", "").isalnum()
 
-    def get_filename(
-        self, base, name_suffix, axis=None, point=None, chip_name=None
-    ):
+    def get_filename(self, base, name_suffix, axis=None, point=None, chip_name=None):
         name = base
         if axis:
             name += "_" + axis.get_name()
@@ -685,15 +696,11 @@ class ResonanceTester:
                                 fan_name = "fan"
                             else:
                                 fan_name = (
-                                    name.split(" ", 1)[1]
-                                    if " " in name
-                                    else name
+                                    name.split(" ", 1)[1] if " " in name else name
                                 )
-
                             active_fans.append(fan_name)
                     except:
                         continue
-
             if active_fans:
                 gcmd.respond_info(
                     "WARNING: Active fans detected: %s\n"
