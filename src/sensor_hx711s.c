@@ -24,16 +24,18 @@
 
 // A corrupt chip frame can pass the framing checks yet carry a value
 // hundreds of thousands of counts from the truth. Real contact force moves
-// the summed counts by well under this between samples (a 2mm/s approach at
-// 80 SPS), so a larger single-sample jump is a glitch, not a load change.
-#define SPIKE_SUM_THRESHOLD 200000
+// each channel by well under this between samples (a 2mm/s approach at 80
+// SPS), so a larger single-sample jump is a glitch, not a load change.
+#define SPIKE_CHANNEL_THRESHOLD 100000
 
 struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
     uint32_t last_error;
-    int32_t last_good_sum;  // summed counts of the last non-glitch sample
-    uint8_t have_last_sum;  // false until the first good sum is seen
+    int32_t last_good_counts[MAX_SENSORS];
+    int32_t pending_counts[MAX_SENSORS];
+    uint8_t have_last_counts;
+    uint8_t have_pending_counts;
     uint8_t pending_flag;
     uint8_t sensor_count;
     uint8_t gain_channel;   // extra clock pulses: chip type + gain selection
@@ -216,19 +218,65 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             append_sample(h, counts_buf[i]);
             sum += counts_buf[i];
         }
-        // Reject single-sample glitches that pass framing but jump
-        // implausibly far from the last good reading - these would
-        // otherwise fire a false probe trigger. Only the trigger is
-        // suppressed; the raw value still went into the bulk buffer above
-        // so the host can see and hold it (and log which chip glitched).
-        int32_t jump = sum - h->last_good_sum;
-        if (jump < 0)
-            jump = -jump;
-        if (!h->have_last_sum || jump <= SPIKE_SUM_THRESHOLD) {
-            h->last_good_sum = sum;
-            h->have_last_sum = 1;
+        // Reject a single-sample glitch on any channel before forwarding the
+        // summed sample to the MCU probe. Keep the raw value in the bulk
+        // buffer so the host can identify the bad channel. A second sample
+        // near the suspicious value confirms a genuine sustained force step;
+        // an immediate return to the last good value confirms an isolated
+        // glitch. This prevents a one-frame corrupt read from tripping the
+        // drift safety range without filtering a real collision forever.
+        uint8_t bad_mask = 0;
+        if (!h->have_last_counts) {
+            for (uint8_t i = 0; i < h->sensor_count; i++)
+                h->last_good_counts[i] = counts_buf[i];
+            h->have_last_counts = 1;
             if (h->lce)
                 load_cell_probe_report_sample(h->lce, sum);
+        } else {
+            for (uint8_t i = 0; i < h->sensor_count; i++) {
+                int32_t delta = counts_buf[i] - h->last_good_counts[i];
+                if (delta > SPIKE_CHANNEL_THRESHOLD
+                    || delta < -SPIKE_CHANNEL_THRESHOLD)
+                    bad_mask |= 1 << i;
+            }
+
+            if (!bad_mask) {
+                // A valid sample confirms that the pending sample was an
+                // isolated glitch. Forward this valid sample normally.
+                h->have_pending_counts = 0;
+                for (uint8_t i = 0; i < h->sensor_count; i++)
+                    h->last_good_counts[i] = counts_buf[i];
+                if (h->lce)
+                    load_cell_probe_report_sample(h->lce, sum);
+            } else if (h->have_pending_counts) {
+                uint8_t pending_match = 1;
+                for (uint8_t i = 0; i < h->sensor_count; i++) {
+                    int32_t delta = counts_buf[i] - h->pending_counts[i];
+                    if (delta > SPIKE_CHANNEL_THRESHOLD
+                        || delta < -SPIKE_CHANNEL_THRESHOLD) {
+                        pending_match = 0;
+                        break;
+                    }
+                }
+                if (pending_match) {
+                    // Two consecutive samples agree on the new value. Treat
+                    // this as a real force change so it cannot be filtered
+                    // indefinitely.
+                    h->have_pending_counts = 0;
+                    for (uint8_t i = 0; i < h->sensor_count; i++)
+                        h->last_good_counts[i] = counts_buf[i];
+                    if (h->lce)
+                        load_cell_probe_report_sample(h->lce, sum);
+                } else {
+                    // Replace a stale pending glitch with the latest sample.
+                    for (uint8_t i = 0; i < h->sensor_count; i++)
+                        h->pending_counts[i] = counts_buf[i];
+                }
+            } else {
+                for (uint8_t i = 0; i < h->sensor_count; i++)
+                    h->pending_counts[i] = counts_buf[i];
+                h->have_pending_counts = 1;
+            }
         }
     }
 
@@ -289,7 +337,8 @@ command_query_hx711s(uint32_t *args)
     sched_del_timer(&h->timer);
     h->pending_flag = 0;
     h->last_error = 0;
-    h->have_last_sum = 0;
+    h->have_last_counts = 0;
+    h->have_pending_counts = 0;
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         for (uint8_t i = 0; i < h->sensor_count; i++)
