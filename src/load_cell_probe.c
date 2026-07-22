@@ -36,6 +36,8 @@ typedef int64_t fixedQ48_t;
 #define ERROR_SAFETY_RANGE 0
 #define ERROR_OVERFLOW 1
 #define ERROR_WATCHDOG 2
+#define ERROR_ADC_INVALID 3
+#define TRIGGER_CONFIRM_SAMPLES 2
 
 // Flags
 enum {FLAG_IS_HOMING = 1 << 0
@@ -51,7 +53,7 @@ struct load_cell_probe {
     struct trsync *ts;
     int32_t safety_counts_min, safety_counts_max, tare_counts;
     uint8_t flags, trigger_reason, error_reason, watchdog_max
-            , watchdog_count;
+            , watchdog_count, trigger_count;
     fixedQ16_t trigger_grams_fixed;
     fixedQ2_t grams_per_count;
     struct sos_filter *sf;
@@ -163,9 +165,26 @@ load_cell_probe_report_sample(struct load_cell_probe *lcp
     const fixedQ16_t filtered_grams = sosfilt(lcp->sf, (fixedQ16_t)raw_grams);
 
     // update trigger state
-    if (abs(filtered_grams) >= lcp->trigger_grams_fixed) {
-        try_trigger(lcp, lcp->last_sample_ticks);
+    int64_t magnitude = filtered_grams;
+    if (magnitude < 0)
+        magnitude = -magnitude;
+    if (magnitude < lcp->trigger_grams_fixed) {
+        lcp->trigger_count = 0;
+        return;
     }
+    // Two consecutive qualified, filtered samples prevent a remaining
+    // one-frame impulse from ending a move. At 80 SPS this adds <=12.5ms.
+    if (lcp->trigger_count < TRIGGER_CONFIRM_SAMPLES)
+        lcp->trigger_count++;
+    if (lcp->trigger_count >= TRIGGER_CONFIRM_SAMPLES)
+        try_trigger(lcp, lcp->last_sample_ticks);
+}
+
+void
+load_cell_probe_report_fault(struct load_cell_probe *lcp)
+{
+    if (is_flag_set(FLAG_IS_HOMING, lcp))
+        trigger_error(lcp, ERROR_ADC_INVALID);
 }
 
 // Timer callback that monitors for timeouts
@@ -226,6 +245,7 @@ command_config_load_cell_probe(uint32_t *args)
     lcp->trigger_ticks = 0;
     lcp->watchdog_max = 0;
     lcp->watchdog_count = 0;
+    lcp->trigger_count = 0;
     lcp->sf = sos_filter_oid_lookup(args[1]);
     set_endstop_range(lcp, 0, 0, 0, 0, 0);
 }
@@ -275,6 +295,7 @@ command_load_cell_probe_home(uint32_t *args)
     lcp->rest_ticks = args[5];
     lcp->watchdog_max = args[6];
     lcp->watchdog_count = 0;
+    lcp->trigger_count = 0;
     lcp->time.func = watchdog_event;
     set_flag(FLAG_IS_HOMING, lcp);
     set_flag(FLAG_AWAIT_HOMING, lcp);

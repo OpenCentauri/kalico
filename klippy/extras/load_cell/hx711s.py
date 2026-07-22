@@ -10,17 +10,10 @@ import logging
 from klippy.mcu import MCU
 
 from .. import bulk_sensor
-from .interfaces import BulkAdcData, BulkAdcDataCallback, LoadCellSensor
+from .interfaces import AdcFault, BulkAdcData, BulkAdcDataCallback, LoadCellSensor
 
 UPDATE_INTERVAL = 0.10
-SAMPLE_ERROR_DESYNC = -0x80000000
-SAMPLE_ERROR_READ_TOO_LONG = 0x40000000
-SAMPLE_ERROR_TORN_READ = 0x20000000
 ADC_FACTOR = 1.0 / (1 << 23)
-# A corrupt chip frame can pass framing yet sit hundreds of thousands of
-# counts from the truth. A single chip's reading moves by well under this
-# between samples during a probe, so a larger one-sample jump is a glitch.
-CHANNEL_SPIKE_THRESHOLD = 100000
 
 
 class HX711SBase(LoadCellSensor):
@@ -36,13 +29,7 @@ class HX711SBase(LoadCellSensor):
         self.printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.sensor_type = sensor_type
-        self.last_error_count = 0
         self.consecutive_fails = 0
-        self.torn_read_count = 0
-        self.spike_count = 0
-        # last valid per-channel counts, held across torn reads and glitches
-        # to keep the sample stream gap-free (see _convert_samples)
-        self._last_channel_counts = None
 
         ppins = self.printer.lookup_object("pins")
         sdo_pin_names = [p.strip() for p in config.get("sdo_pins").split(",")]
@@ -82,7 +69,9 @@ class HX711SBase(LoadCellSensor):
 
         # Bulk sensor setup
         chip_smooth = self.sps * UPDATE_INTERVAL * 2
-        unpack_format = "<" + ("i" * self.sensor_count)
+        # The final word is MCU-owned frame quality.  Raw counts stay in the
+        # stream for diagnosis, but only quality==0 reaches control clients.
+        unpack_format = "<" + ("i" * self.sensor_count) + "I"
         self.ffreader = bulk_sensor.FixedFreqReader(mcu, chip_smooth,
                                                     unpack_format)
         self.batch_bulk = bulk_sensor.BatchBulkHelper(
@@ -142,59 +131,19 @@ class HX711SBase(LoadCellSensor):
     def attach_load_cell_probe(self, load_cell_probe_oid: int):
         self.attach_probe_cmd.send([self.oid, load_cell_probe_oid])
 
-    # True if any channel jumped implausibly far from the last good sample.
-    # Logs which channel(s) glitched so the offending chip can be identified.
-    def _is_glitch(self, channel_counts, ptime):
-        last = self._last_channel_counts
-        if last is None:
-            return False
-        bad = [
-            i
-            for i, (c, p) in enumerate(zip(channel_counts, last))
-            if abs(c - p) > CHANNEL_SPIKE_THRESHOLD
-        ]
-        if not bad:
-            return False
-        self.spike_count += 1
-        logging.warning(
-            "%s: glitch dropped at t=%.3f; channel(s) %s jumped"
-            " (now=%s last=%s)",
-            self.name, ptime, bad, list(channel_counts), list(last),
-        )
-        return True
-
     def _convert_samples(self, samples):
         count = 0
+        faults: list[AdcFault] = []
         for sample in samples:
             ptime = sample[0]
-            channel_counts = sample[1:]
-            val = channel_counts[0]
-            if val == SAMPLE_ERROR_TORN_READ:
-                # A chip latched new data mid-read; the MCU flagged it. Hold
-                # the last valid reading in its place rather than dropping the
-                # sample, so the stream stays gap-free and uniformly spaced
-                # for downstream consumers (tap analysis decomposes the force
-                # curve by index and is fragile to missing points). The held
-                # value is within one sample period of the true force, so it
-                # cannot cause a false probe trigger.
-                self.torn_read_count += 1
-                if self._last_channel_counts is None:
-                    continue  # nothing to hold yet; drop the leading torn read
-                channel_counts = self._last_channel_counts
-            elif val == SAMPLE_ERROR_DESYNC:
-                self.last_error_count += 1
-                logging.error("%s: DESYNC at t=%.3f", self.name, ptime)
-                break  # errors latch in the MCU, the rest are duplicates
-            elif val == SAMPLE_ERROR_READ_TOO_LONG:
-                self.last_error_count += 1
-                logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
-                break  # errors latch in the MCU, the rest are duplicates
-            elif self._is_glitch(channel_counts, ptime):
-                # corrupt frame that passed framing; hold the last good
-                # reading so the curve stays clean for tap analysis
-                channel_counts = self._last_channel_counts
-            else:
-                self._last_channel_counts = channel_counts
+            channel_counts = tuple(sample[1 : 1 + self.sensor_count])
+            quality = sample[1 + self.sensor_count]
+            if quality:
+                faults.append(
+                    {"time": round(ptime, 6), "counts": channel_counts,
+                     "quality": quality}
+                )
+                continue
             converted = [round(ptime, 6)]
             for ch in channel_counts:
                 converted.append(ch)
@@ -202,12 +151,10 @@ class HX711SBase(LoadCellSensor):
             samples[count] = tuple(converted)
             count += 1
         del samples[count:]
+        return faults
 
     def _start_measurements(self):
         self.consecutive_fails = 0
-        self.last_error_count = 0
-        # discard any held value from a prior (now power-cycled) stream
-        self._last_channel_counts = None
         rest_ticks = self.mcu.seconds_to_clock(
             1.0 / (10.0 * self.get_samples_per_second())
         )
@@ -228,33 +175,26 @@ class HX711SBase(LoadCellSensor):
 
     def _process_batch(self, eventtime) -> BulkAdcData:
         prev_overflows = self.ffreader.get_last_overflows()
-        prev_error_count = self.last_error_count
         samples = self.ffreader.pull_samples()
-        self._convert_samples(samples)
+        faults = self._convert_samples(samples)
         overflows = self.ffreader.get_last_overflows() - prev_overflows
-        errors = self.last_error_count - prev_error_count
-        if errors > 0:
-            # a read error desyncs the chips and may corrupt their gain
-            # setting; only a power cycle restores a known state
-            logging.error(
-                "%s: forced sensor restart due to read error", self.name
+        errors = len(faults)
+        if faults:
+            logging.warning(
+                "%s: dropped %d invalid HX711 frame(s); latest quality=0x%x",
+                self.name, errors, faults[-1]["quality"],
             )
-            self._finish_measurements()
-            self._start_measurements()
-        elif overflows > 0:
+        if overflows > 0:
             self.consecutive_fails += 1
             if self.consecutive_fails > 4:
-                logging.error(
-                    "%s: forced sensor restart due to overflows", self.name
-                )
-                self._finish_measurements()
-                self._start_measurements()
+                logging.error("%s: repeated bulk overflows", self.name)
         else:
             self.consecutive_fails = 0
         return {
             "data": samples,
-            "errors": self.last_error_count,
-            "overflows": self.ffreader.get_last_overflows(),
+            "errors": errors,
+            "overflows": overflows,
+            "faults": faults,
         }
 
 

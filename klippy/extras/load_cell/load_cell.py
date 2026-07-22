@@ -687,7 +687,10 @@ class LoadCell:
                 )
                 sample.append(counts)
             samples.append(sample)
-        msg = {"data": samples, "errors": errors, "overflows": overflows}
+        msg = {
+            "data": samples, "errors": errors, "overflows": overflows,
+            "faults": [],
+        }
         self.clients.send(msg)
         return True
 
@@ -798,7 +801,18 @@ class LoadCell:
         collector.start_collecting(min_time=toolhead.get_last_move_time())
         samples, errors = collector.collect_min(num_samples)
         self.validate_samples(samples, errors)
-        return self._avg_counts_from_samples(samples)
+        # A median is resilient to a single physically plausible but bad
+        # frame. Acquisition faults have already made validate_samples fail.
+        first_channel_col = SampleStructure.channel_counts_col(0)
+        channels = [
+            sorted(sample[first_channel_col + (2 * channel)] for sample in samples)
+            for channel in range(self.channel_count)
+        ]
+        midpoint = len(samples) // 2
+        if len(samples) % 2:
+            return tuple(values[midpoint] for values in channels)
+        return tuple((values[midpoint - 1] + values[midpoint]) // 2
+                     for values in channels)
 
     def validate_samples(self, samples, errors):
         if errors:

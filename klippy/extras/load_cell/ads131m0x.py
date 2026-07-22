@@ -261,6 +261,7 @@ class ADS131MxBase(LoadCellSensor):
             "data": self._convert_samples(samples),
             "errors": self.last_error_count,
             "overflows": self.ffreader.get_last_overflows(),
+            "faults": [],
         }
 
     # --- SPI Communication Helpers ---

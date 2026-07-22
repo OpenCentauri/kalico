@@ -11,12 +11,21 @@ from typing import Protocol, TypedDict
 from klippy.mcu import MCU
 
 
+class AdcFault(TypedDict):
+    """An invalid raw ADC frame kept for diagnostics, never for control."""
+
+    time: float
+    counts: tuple[int, ...]
+    quality: int
+
+
 class BulkAdcData(TypedDict):
     """Dictionary returned by sensors containing raw sensor data"""
 
     data: list[tuple[float, ...]]
     errors: int
     overflows: int
+    faults: list[AdcFault]
 
 
 """Clients of the ADC receive a BulkAdcData dictionary and return True or 

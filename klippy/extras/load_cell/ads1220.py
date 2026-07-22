@@ -240,6 +240,7 @@ class ADS1220(LoadCellSensor):
             "data": samples,
             "errors": self.last_error_count,
             "overflows": self.ffreader.get_last_overflows(),
+            "faults": [],
         }
 
     def reset_chip(self):

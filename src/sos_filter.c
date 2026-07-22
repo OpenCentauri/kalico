@@ -70,13 +70,20 @@ sosfilt(struct sos_filter *sf, const int32_t unfiltered_value) {
     for (int section_idx = 0; section_idx < sf->n_sections; section_idx++) {
         struct sos_filter_section *section = &(sf->filter[section_idx]);
         // apply the section's filter coefficients to input
-        fixedQ_value_t next_val = fixed_mul(sf, section->coeff[0], cur_val);
-        next_val += section->state[0];
-        section->state[0] = fixed_mul(sf, section->coeff[1], cur_val)
-                            - fixed_mul(sf, section->coeff[3], next_val)
-                            + (section->state[1]);
-        section->state[1] = fixed_mul(sf, section->coeff[2], cur_val)
-                            - fixed_mul(sf, section->coeff[4], next_val);
+        int64_t next = (int64_t)fixed_mul(sf, section->coeff[0], cur_val)
+                        + section->state[0];
+        if (overflows_int32(next))
+            shutdown("sosfilt: output overflow");
+        fixedQ_value_t next_val = next;
+        int64_t state0 = (int64_t)fixed_mul(sf, section->coeff[1], cur_val)
+                         - fixed_mul(sf, section->coeff[3], next_val)
+                         + section->state[1];
+        int64_t state1 = (int64_t)fixed_mul(sf, section->coeff[2], cur_val)
+                         - fixed_mul(sf, section->coeff[4], next_val);
+        if (overflows_int32(state0) || overflows_int32(state1))
+            shutdown("sosfilt: state overflow");
+        section->state[0] = state0;
+        section->state[1] = state1;
         cur_val = next_val;
     }
 
@@ -108,8 +115,8 @@ sos_filter_oid_lookup(uint8_t oid)
 static void
 validate_section_index(struct sos_filter *sf, uint8_t section_idx)
 {
-    if (section_idx > sf->max_sections)
-        shutdown("Filter section index larger than max_sections");
+    if (section_idx >= sf->max_sections)
+        shutdown("Filter section index outside max_sections");
 }
 
 // Set one section of the filter
@@ -154,7 +161,8 @@ command_sos_filter_activate(uint32_t *args)
 {
     struct sos_filter *sf = sos_filter_oid_lookup(args[0]);
     uint8_t n_sections = args[1];
-    validate_section_index(sf, n_sections);
+    if (n_sections > sf->max_sections)
+        shutdown("Filter section count larger than max_sections");
     sf->n_sections = n_sections;
     const uint8_t coeff_int_bits = args[2];
     sf->coeff_frac_bits = (31 - coeff_int_bits);

@@ -6,5 +6,6 @@
 struct load_cell_probe *load_cell_probe_oid_lookup(uint8_t oid);
 void load_cell_probe_report_sample(struct load_cell_probe *lce
                         , int32_t sample);
+void load_cell_probe_report_fault(struct load_cell_probe *lce);
 
 #endif // load_cell_probe.h

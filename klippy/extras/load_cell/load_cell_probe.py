@@ -370,8 +370,9 @@ class ContinuousTareFilterHelper:
             return
         # update MCU filter from GCode command
         self._sos_filter.change_filter(
-            self._active_design.design_filter(gcmd.error)
+            gcmd_filter.design_filter(gcmd.error)
         )
+        self._active_design = gcmd_filter
 
     def get_sos_filter(self) -> sos_filter.SosFilter:
         return self._sos_filter
@@ -391,9 +392,14 @@ class LoadCellProbeConfigHelper:
         self._load_cell: LoadCell = load_cell_inst
         self._sensor = load_cell_inst.get_sensor()
         self._rest_time = 1.0 / float(self._sensor.get_samples_per_second())
-        # Collect 5 x 50hz power cycles of data to average across power noise
+        # Keep tare_time for existing configurations, but use a 30-sample
+        # health window by default.  At 80 SPS this matches the 375ms
+        # qualification window used by Elegoo before it arms each tap.
         self._tare_time_param = floatParamHelper(
             config, "tare_time", default=5.0 / 50.0, minval=0.01, maxval=1.0
+        )
+        self._tare_samples_param = intParamHelper(
+            config, "tare_samples", default=30, minval=2, maxval=200
         )
         # triggering options
         self._trigger_force_param = intParamHelper(
@@ -422,9 +428,13 @@ class LoadCellProbeConfigHelper:
         )
 
     def get_tare_samples(self, gcmd=None) -> int:
+        # A command may still request a longer time-based window; never let
+        # legacy tare_time reduce the health qualification below 30 samples.
         tare_time = self._tare_time_param.get(gcmd)
-        sps = self._sensor.get_samples_per_second()
-        return max(2, math.ceil(tare_time * sps))
+        time_samples = math.ceil(
+            tare_time * self._sensor.get_samples_per_second()
+        )
+        return max(self._tare_samples_param.get(gcmd), time_samples)
 
     def get_trigger_force_grams(self, gcmd=None) -> int:
         return self._trigger_force_param.get(gcmd)
@@ -525,6 +535,7 @@ class McuLoadCellProbe:
     ERROR_SAFETY_RANGE = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 1
     ERROR_OVERFLOW = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 2
     ERROR_WATCHDOG = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 3
+    ERROR_ADC_INVALID = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 4
 
     def __init__(
         self,
@@ -647,6 +658,8 @@ class LoadCellPrimitives:
         "math overflow",
         McuLoadCellProbe.ERROR_WATCHDOG: "Load Cell Probe Error: timed out "
         "waiting for sensor data",
+        McuLoadCellProbe.ERROR_ADC_INVALID: "Load Cell Probe Error: invalid "
+        "HX711 sample; see sensor fault diagnostics",
     }
 
     def __init__(
