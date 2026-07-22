@@ -219,6 +219,12 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     }
     quality |= (uint32_t)channel_mask << HX711S_Q_CHANNEL_SHIFT;
 
+    // A complete sample must fit before appending it.  In the four-channel
+    // case each frame is 20 bytes, while the shared bulk buffer is 51 bytes:
+    // appending first when it already contains 40 bytes would overrun it.
+    if (h->sb.data_count + h->sample_bytes > ARRAY_SIZE(h->sb.data))
+        sensor_bulk_report(&h->sb, oid);
+
     for (uint8_t i = 0; i < h->sensor_count; i++)
         append_value(h, counts[i]);
     append_value(h, quality);
@@ -236,8 +242,6 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     if (quality & (HX711S_Q_NOT_READY | HX711S_Q_EXTRA_LOW
                    | HX711S_Q_POST_READ_LOW | HX711S_Q_READ_OVERRUN))
         hx711s_begin_reset(h);
-    if (h->sb.data_count + h->sample_bytes > ARRAY_SIZE(h->sb.data))
-        sensor_bulk_report(&h->sb, oid);
 }
 
 void
