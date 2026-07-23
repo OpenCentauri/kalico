@@ -6141,11 +6141,12 @@ sensor_type:
 #   The default is +/-1Kg.
 #trigger_force: 75.0
 #   The force that the probe will trigger at. 75g is the default.
-#trigger_confirm_time: 0.0125
+#trigger_confirm_time: 0.0
 #   The minimum time, in seconds, that force must remain above trigger_force
 #   before a probe is accepted. The first threshold crossing remains the
-#   reported contact time. The default is 0.0125 seconds. Set to 0 to disable
-#   confirmation.
+#   reported contact time. The default is 0: trigger on the first filtered
+#   crossing, matching upstream behavior. Set a positive value to confirm
+#   over a fixed duration and reject one-frame impulses.
 #drift_filter_cutoff_frequency: 0.8
 #   Enable optional continuous taring while homing & probing to reject drift.
 #   The value is a frequency, in Hz, below which drift will be ignored. This

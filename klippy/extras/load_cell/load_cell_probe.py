@@ -409,14 +409,16 @@ class LoadCellProbeConfigHelper:
         self._trigger_force_param = intParamHelper(
             config, "trigger_force", default=75, minval=10, maxval=250
         )
-        # Require force to remain above the threshold for a fixed duration,
-        # independent of the ADC's configured sample rate.  The MCU reports
-        # the first crossing as contact time after the later samples confirm
-        # it was not a one-frame impulse.
+        # Optional confirmation window: force may remain above the threshold
+        # for a fixed duration before triggering.  The default of 0 triggers
+        # on the first filtered crossing, matching upstream Kalico; a
+        # positive value rejects one-frame impulses at the cost of extra
+        # post-contact travel.  The first crossing is always the reported
+        # contact time.
         self._trigger_confirm_time_param = floatParamHelper(
             config,
             "trigger_confirm_time",
-            default=0.0125,
+            default=0.0,
             minval=0.0,
             maxval=0.100,
         )
