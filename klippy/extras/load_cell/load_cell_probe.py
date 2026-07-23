@@ -12,7 +12,11 @@ from klippy import mcu
 from klippy.configfile import ConfigWrapper, PrinterConfig
 from klippy.extras.bed_mesh import BedMesh
 from klippy.extras.homing import PrinterHoming
-from klippy.extras.probe import PrinterProbe, ProbePointsHelper
+from klippy.extras.probe import (
+    HX711_INVALID_SAMPLE_ERROR,
+    PrinterProbe,
+    ProbePointsHelper,
+)
 from klippy.gcode import GCodeCommand, GCodeDispatch
 from klippy.printer import Printer
 from klippy.toolhead import ToolHead
@@ -671,6 +675,10 @@ class McuLoadCellProbe:
 
 # Execute probing moves using the McuLoadCellProbe
 class LoadCellPrimitives:
+    SINGLE_ACQUISITION_ERROR = (
+        "Sensor reported 1 acquisition errors and 0 bulk overflows while "
+        "sampling"
+    )
     ERROR_MAP = {
         mcu.MCU_trsync.REASON_COMMS_TIMEOUT: "Communication timeout during "
         "homing",
@@ -715,11 +723,31 @@ class LoadCellPrimitives:
         collector.start_collecting(min_time=print_time)
         return collector
 
+    def _is_hx711_sensor(self) -> bool:
+        sensor_type = getattr(self._load_cell.sensor, "sensor_type", "")
+        return sensor_type in ("hx711", "hx711s")
+
+    def _raise_invalid_hx711_sample(self):
+        raise self._printer.command_error(
+            f"{HX711_INVALID_SAMPLE_ERROR}; see sensor fault diagnostics"
+        )
+
+    def _raise_if_retryable_collector_error(self, error):
+        if (
+            self._is_hx711_sensor()
+            and self.SINGLE_ACQUISITION_ERROR in str(error)
+        ):
+            self._raise_invalid_hx711_sample()
+
     # pauses for the last move to complete and then
     # sets the endstop tare value and range
     def tare(self, gcmd=None):
         num_samples = self._config_helper.get_tare_samples(gcmd)
-        tare_counts_per_channel = self._load_cell.avg_counts(num_samples)
+        try:
+            tare_counts_per_channel = self._load_cell.avg_counts(num_samples)
+        except self._printer.command_error as e:
+            self._raise_if_retryable_collector_error(e)
+            raise
         self._load_cell.tare(tare_counts_per_channel)
         self._config_helper.assert_force_safety_limit(gcmd)
         # update sos_filter with any gcode parameter changes
@@ -785,6 +813,8 @@ class LoadCellPrimitives:
         return self.home_wait(print_time + timeout)
 
     def validate_samples(self, samples, errors):
+        if self._is_hx711_sensor() and errors == (1, 0):
+            self._raise_invalid_hx711_sample()
         self._load_cell.validate_samples(samples, errors)
 
     def get_status(self, eventtime):

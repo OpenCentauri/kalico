@@ -14,6 +14,7 @@ from klippy.extras.load_cell.hx711s import (
     quality_is_hard,
 )
 from klippy.extras.load_cell.load_cell import LoadCellSampleCollector
+from klippy.extras.load_cell.load_cell_probe import LoadCellPrimitives
 from klippy.extras.probe import PrinterProbe
 
 
@@ -265,6 +266,8 @@ def make_probe_runner(outcomes):
 
     def do_probe(_speed, _gcmd):
         outcome = outcomes.pop(0)
+        if callable(outcome):
+            return outcome()
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -273,6 +276,72 @@ def make_probe_runner(outcomes):
     probe._retract = retract
     probe._probe = do_probe
     return probe
+
+
+class FakePrimitiveSensor:
+    def __init__(self, sensor_type="hx711s"):
+        self.sensor_type = sensor_type
+
+
+class FakePrimitiveLoadCell:
+    def __init__(self, sensor_type="hx711s"):
+        self.sensor = FakePrimitiveSensor(sensor_type)
+        self.validated = []
+        self.tared = []
+
+    def validate_samples(self, samples, errors):
+        self.validated.append((samples, errors))
+        if errors:
+            error_count, overflow_count = errors
+            raise ProbeCommandError(
+                "Sensor reported %i acquisition errors and %i bulk "
+                "overflows while sampling" % (error_count, overflow_count)
+            )
+
+    def avg_counts(self, _num_samples):
+        raise ProbeCommandError(
+            "Sensor reported 1 acquisition errors and 0 bulk overflows while "
+            "sampling"
+        )
+
+    def tare(self, counts):
+        self.tared.append(counts)
+
+
+class FakeProbeConfigHelper:
+    def get_tare_samples(self, _gcmd):
+        return 4
+
+    def assert_force_safety_limit(self, _gcmd):
+        pass
+
+
+class FakeContinuousTareFilterHelper:
+    def update_from_command(self, _gcmd):
+        pass
+
+
+class FakeMcuLoadCellProbe:
+    def set_endstop_range(self, _gcmd):
+        pass
+
+
+def make_load_cell_primitives(sensor_type="hx711s"):
+    primitives = LoadCellPrimitives.__new__(LoadCellPrimitives)
+    primitives._printer = FakeProbePrinter()
+    primitives._load_cell = FakePrimitiveLoadCell(sensor_type)
+    primitives._config_helper = FakeProbeConfigHelper()
+    primitives._continuous_tare_filter_helper = FakeContinuousTareFilterHelper()
+    primitives._mcu_load_cell_probe = FakeMcuLoadCellProbe()
+    return primitives
+
+
+def collector_error_probe(primitives, errors):
+    def do_probe():
+        primitives.validate_samples([], errors)
+        return [10.0, 20.0, -0.42], True
+
+    return do_probe
 
 
 def test_probe_retries_one_invalid_hx711_sample():
@@ -297,6 +366,38 @@ def test_probe_retries_one_invalid_hx711_sample():
     assert gcmd.messages == ["HX711 invalid sample detected. Retrying..."]
 
 
+def test_probe_retries_one_hx711_collector_acquisition_error():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives()
+    probe = make_probe_runner(
+        [
+            collector_error_probe(primitives, (1, 0)),
+            ([10.0, 20.0, -0.42], True),
+        ]
+    )
+
+    result = probe._run_probe_with_retries(5.0, retry_session, gcmd)
+
+    assert result == [10.0, 20.0, -0.42]
+    assert probe.retracts == 1
+    assert len(probe.moves) == 2
+    assert retry_session.evaluated == [True]
+    assert primitives._load_cell.validated == []
+    assert gcmd.messages == ["HX711 invalid sample detected. Retrying..."]
+
+
+def test_probe_tare_converts_one_hx711_collector_acquisition_error():
+    primitives = make_load_cell_primitives()
+
+    try:
+        primitives.tare(FakeGcmd())
+    except ProbeCommandError as e:
+        assert "Load Cell Probe Error: invalid HX711 sample" in str(e)
+    else:
+        assert False, "single HX711 tare acquisition error should be retryable"
+
+
 def test_probe_does_not_retry_repeated_invalid_hx711_samples():
     gcmd = FakeGcmd()
     retry_session = FakeProbeRetrySession()
@@ -316,6 +417,65 @@ def test_probe_does_not_retry_repeated_invalid_hx711_samples():
 
     assert probe.retracts == 1
     assert len(probe.moves) == 2
+    assert retry_session.evaluated == []
+
+
+def test_probe_does_not_retry_repeated_hx711_collector_acquisition_errors():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives()
+    probe = make_probe_runner(
+        [
+            collector_error_probe(primitives, (1, 0)),
+            collector_error_probe(primitives, (1, 0)),
+        ]
+    )
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError:
+        pass
+    else:
+        assert False, "second collector acquisition error should remain fatal"
+
+    assert probe.retracts == 1
+    assert len(probe.moves) == 2
+    assert retry_session.evaluated == []
+
+
+def test_probe_does_not_retry_collector_bulk_overflow():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives()
+    probe = make_probe_runner([collector_error_probe(primitives, (1, 1))])
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError as e:
+        assert "1 bulk overflows" in str(e)
+    else:
+        assert False, "bulk overflow should remain a hard failure"
+
+    assert probe.retracts == 0
+    assert len(probe.moves) == 1
+    assert retry_session.evaluated == []
+
+
+def test_probe_does_not_retry_non_hx711_collector_acquisition_error():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives("ads1220")
+    probe = make_probe_runner([collector_error_probe(primitives, (1, 0))])
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError as e:
+        assert "1 acquisition errors" in str(e)
+    else:
+        assert False, "non-HX711 acquisition errors should remain generic"
+
+    assert probe.retracts == 0
+    assert len(probe.moves) == 1
     assert retry_session.evaluated == []
 
 
