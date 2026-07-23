@@ -45,6 +45,12 @@
 // Bit 6 is reserved for the host-synthetic frame-format flag.
 #define HX711S_Q_TIMING_STREAK  (1 << 7)
 #define HX711S_TIMING_STREAK_LIMIT 40
+
+// A genuine load change moves each channel by well under this between
+// samples (a 2 mm/s approach at 80 SPS moves the four-channel sum by only
+// ~5k counts), so a larger single-sample jump on one channel is a glitch,
+// not a load change.
+#define HX711S_SPIKE_THRESHOLD 100000
 #define HX711S_FRAME_TAG        UINT32_C(0xa7110000)
 
 enum hx711s_state {
@@ -61,6 +67,8 @@ struct hx711s_adc {
     uint32_t rest_ticks;
     uint8_t pending_flag, sensor_count, gain_channel, sample_bytes;
     uint8_t state, settling_frames, qualify_frames, timing_streak;
+    int32_t last_good_counts[MAX_SENSORS], pending_counts[MAX_SENSORS];
+    uint8_t have_last_counts, have_pending_counts;
     struct gpio_in sdos[MAX_SENSORS];
     struct gpio_out clks[MAX_SENSORS];
     struct sensor_bulk sb;
@@ -192,8 +200,20 @@ hx711s_begin_reset(struct hx711s_adc *h)
     h->settling_frames = SETTLING_FRAMES;
     h->qualify_frames = QUALIFY_FRAMES;
     h->timing_streak = 0;
+    h->have_last_counts = 0;
+    h->have_pending_counts = 0;
     h->timer.waketime = timer_read_time() + timer_from_us(POWERDOWN_US);
     sched_add_timer(&h->timer);
+}
+
+static void
+hx711s_report_sum(struct hx711s_adc *h, int32_t *counts,
+                  uint32_t capture_ticks)
+{
+    int32_t sum = 0;
+    for (uint8_t i = 0; i < h->sensor_count; i++)
+        sum += counts[i];
+    load_cell_probe_report_sample_at(h->lce, sum, capture_ticks);
 }
 
 static void
@@ -299,11 +319,63 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     }
     h->timing_streak = 0;
     if (!quality && h->state == HX711S_ONLINE) {
-        int32_t sum = 0;
+        if (!h->lce)
+            return;
+        // Reject a single-sample glitch on any channel before forwarding the
+        // summed sample to the probe. The raw frame above still streams to
+        // the host, so the bad channel stays visible in diagnostics. A
+        // second sample near the suspicious value confirms a genuine force
+        // step; an immediate return to the last good value confirms an
+        // isolated glitch. This keeps a one-frame corrupt read from tripping
+        // the drift safety range without filtering a real collision forever.
+        // (Adapted from OpenCentauri/kalico hx711s-new.)
+        if (!h->have_last_counts) {
+            for (uint8_t i = 0; i < h->sensor_count; i++)
+                h->last_good_counts[i] = counts[i];
+            h->have_last_counts = 1;
+            hx711s_report_sum(h, counts, capture_ticks);
+            return;
+        }
+        uint8_t bad_mask = 0;
+        for (uint8_t i = 0; i < h->sensor_count; i++) {
+            int32_t delta = counts[i] - h->last_good_counts[i];
+            if (delta > HX711S_SPIKE_THRESHOLD
+                || delta < -HX711S_SPIKE_THRESHOLD)
+                bad_mask |= 1 << i;
+        }
+        if (!bad_mask) {
+            // A valid sample confirms any pending sample was a glitch.
+            h->have_pending_counts = 0;
+            for (uint8_t i = 0; i < h->sensor_count; i++)
+                h->last_good_counts[i] = counts[i];
+            hx711s_report_sum(h, counts, capture_ticks);
+            return;
+        }
+        if (h->have_pending_counts) {
+            uint8_t pending_match = 1;
+            for (uint8_t i = 0; i < h->sensor_count; i++) {
+                int32_t delta = counts[i] - h->pending_counts[i];
+                if (delta > HX711S_SPIKE_THRESHOLD
+                    || delta < -HX711S_SPIKE_THRESHOLD) {
+                    pending_match = 0;
+                    break;
+                }
+            }
+            if (pending_match) {
+                // Two consecutive samples agree on the new value: a genuine
+                // force step that must not be filtered forever.
+                h->have_pending_counts = 0;
+                for (uint8_t i = 0; i < h->sensor_count; i++)
+                    h->last_good_counts[i] = counts[i];
+                hx711s_report_sum(h, counts, capture_ticks);
+                return;
+            }
+        }
+        // Store (or replace) the suspicious sample and wait for the next
+        // one to judge it.
         for (uint8_t i = 0; i < h->sensor_count; i++)
-            sum += counts[i];
-        if (h->lce)
-            load_cell_probe_report_sample_at(h->lce, sum, capture_ticks);
+            h->pending_counts[i] = counts[i];
+        h->have_pending_counts = 1;
     }
 }
 
