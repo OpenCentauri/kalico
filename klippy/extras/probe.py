@@ -24,6 +24,8 @@ consider reducing the Z axis minimum position so the probe
 can travel further (the Z minimum position can be negative).
 """
 
+HX711_INVALID_SAMPLE_ERROR = "Load Cell Probe Error: invalid HX711 sample"
+
 
 class RetryStrategy(IntEnum):
     # Probe strategy constants
@@ -523,10 +525,22 @@ class PrinterProbe:
         self, speed: float, retry_session: RetrySession, gcmd: GCodeCommand
     ) -> list[float]:
         """Probe for a single good result with retries based on strategy"""
+        hx711_invalid_retries = 0
         while retry_session.can_retry():
             self._move(retry_session.get_probe_position(), self.retry_speed)
             # Probe position
-            pos, is_good = self._probe(speed, gcmd)
+            try:
+                pos, is_good = self._probe(speed, gcmd)
+            except self.printer.command_error as e:
+                if (
+                    HX711_INVALID_SAMPLE_ERROR not in str(e)
+                    or hx711_invalid_retries
+                ):
+                    raise
+                hx711_invalid_retries += 1
+                gcmd.respond_info("HX711 invalid sample detected. Retrying...")
+                self._retract(gcmd)
+                continue
             if retry_session.evaluate_probe(is_good):
                 # return the x/y of the original requested location
                 return list(retry_session.get_position() + (pos[2],))

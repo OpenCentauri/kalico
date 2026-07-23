@@ -14,6 +14,7 @@ from klippy.extras.load_cell.hx711s import (
     quality_is_hard,
 )
 from klippy.extras.load_cell.load_cell import LoadCellSampleCollector
+from klippy.extras.probe import PrinterProbe
 
 
 class FakeMcu:
@@ -202,3 +203,141 @@ def test_collector_preserves_legacy_batch_errors_without_fault_records():
 
     _samples, errors = collector._finish_collecting()
     assert errors == (2, 1)
+
+
+class ProbeCommandError(Exception):
+    pass
+
+
+class FakeProbePrinter:
+    command_error = ProbeCommandError
+
+
+class FakeGcmd:
+    def __init__(self):
+        self.messages = []
+
+    def respond_info(self, message):
+        self.messages.append(message)
+
+    def error(self, message):
+        return ProbeCommandError(message)
+
+
+class FakeProbeRetrySession:
+    def __init__(self):
+        self.positions = [(10.0, 20.0, None), (10.0, 20.0, None)]
+        self.evaluated = []
+
+    def can_retry(self):
+        return bool(self.positions)
+
+    def get_probe_position(self):
+        return self.positions.pop(0)
+
+    def evaluate_probe(self, is_good):
+        self.evaluated.append(is_good)
+        return is_good
+
+    def get_position(self):
+        return (10.0, 20.0)
+
+    def get_bad_probe_count(self):
+        return len(self.evaluated)
+
+    def scrub_nozzle(self):
+        pass
+
+
+def make_probe_runner(outcomes):
+    probe = PrinterProbe.__new__(PrinterProbe)
+    probe.printer = FakeProbePrinter()
+    probe.retry_speed = 7.0
+    probe.moves = []
+    probe.retracts = 0
+    outcomes = list(outcomes)
+
+    def move(pos, speed):
+        probe.moves.append((pos, speed))
+
+    def retract(_gcmd):
+        probe.retracts += 1
+
+    def do_probe(_speed, _gcmd):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    probe._move = move
+    probe._retract = retract
+    probe._probe = do_probe
+    return probe
+
+
+def test_probe_retries_one_invalid_hx711_sample():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    probe = make_probe_runner(
+        [
+            ProbeCommandError(
+                "Load Cell Probe Error: invalid HX711 sample; "
+                "see sensor fault diagnostics"
+            ),
+            ([10.0, 20.0, -0.42], True),
+        ]
+    )
+
+    result = probe._run_probe_with_retries(5.0, retry_session, gcmd)
+
+    assert result == [10.0, 20.0, -0.42]
+    assert probe.retracts == 1
+    assert len(probe.moves) == 2
+    assert retry_session.evaluated == [True]
+    assert gcmd.messages == ["HX711 invalid sample detected. Retrying..."]
+
+
+def test_probe_does_not_retry_repeated_invalid_hx711_samples():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    probe = make_probe_runner(
+        [
+            ProbeCommandError("Load Cell Probe Error: invalid HX711 sample"),
+            ProbeCommandError("Load Cell Probe Error: invalid HX711 sample"),
+        ]
+    )
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError:
+        pass
+    else:
+        assert False, "second invalid HX711 sample should remain a hard failure"
+
+    assert probe.retracts == 1
+    assert len(probe.moves) == 2
+    assert retry_session.evaluated == []
+
+
+def test_probe_does_not_retry_hard_load_cell_safety_error():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    probe = make_probe_runner(
+        [
+            ProbeCommandError(
+                "Load Cell Probe Error: force exceeded drift_safety_limit "
+                "before triggering!"
+            )
+        ]
+    )
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError:
+        pass
+    else:
+        assert False, "safety failures must not be retried as transient samples"
+
+    assert probe.retracts == 0
+    assert len(probe.moves) == 1
+    assert retry_session.evaluated == []
