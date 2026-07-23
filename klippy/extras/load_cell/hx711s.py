@@ -29,8 +29,10 @@ Q_POST_READ_LOW = 1 << 3
 Q_READ_OVERRUN = 1 << 4
 Q_SATURATED = 1 << 5
 Q_FRAME_FORMAT = 1 << 6
+Q_TIMING_STREAK = 1 << 7
 Q_CHANNEL_SHIFT = 8
 Q_CHANNEL_MASK = 0xF << Q_CHANNEL_SHIFT
+Q_TIMING_MISS = Q_NOT_READY | Q_EXTRA_LOW | Q_POST_READ_LOW
 FRAME_TAG = 0xA7110000
 FRAME_TAG_MASK = 0xFFFF0000
 QUALITY_FLAGS = (
@@ -41,14 +43,16 @@ QUALITY_FLAGS = (
     (Q_READ_OVERRUN, "read_overrun"),
     (Q_SATURATED, "saturated"),
     (Q_FRAME_FORMAT, "frame_format"),
+    (Q_TIMING_STREAK, "timing_streak"),
 )
 
 
 def quality_is_hard(quality: int) -> bool:
-    # Channel bits and unknown future bits are conservatively hard.  The only
-    # non-control frame that is expected during successful recovery is a pure
-    # settling/qualification frame.
-    return bool(quality & ~Q_SETTLING)
+    # Settling/qualification frames and timing-miss frames (a read racing the
+    # free-running conversion clock) are excluded from control data but are
+    # not faults; the MCU escalates a persistent timing streak itself.
+    # Channel bits only locate a frame's fault and carry no severity.
+    return bool(quality & ~(Q_SETTLING | Q_TIMING_MISS | Q_CHANNEL_MASK))
 
 
 def quality_flags(quality: int) -> tuple[str, ...]:
@@ -160,6 +164,7 @@ class HX711SBase(LoadCellSensor):
         self._pending_log_channels = Counter()
         self._pending_log_hard = 0
         self._pending_log_settling = 0
+        self._pending_log_timing = 0
         self._last_fault_log = float("-inf")
 
         ppins = self.printer.lookup_object("pins")
@@ -304,13 +309,17 @@ class HX711SBase(LoadCellSensor):
                 }
                 faults.append(fault)
                 self._health["fault"] += 1
-                self._health["hard" if hard else "settling"] += 1
+                if hard:
+                    self._health["hard"] += 1
+                    self._last_hard_fault = fault
+                elif quality & Q_TIMING_MISS:
+                    self._health["timing"] += 1
+                else:
+                    self._health["settling"] += 1
                 for flag in flags:
                     self._quality_totals[flag] += 1
                 for channel in channels:
                     self._channel_fault_totals[channel] += 1
-                if hard:
-                    self._last_hard_fault = fault
                 continue
             self._health["valid"] += 1
             converted = [round(ptime, 6)]
@@ -323,8 +332,6 @@ class HX711SBase(LoadCellSensor):
         return faults
 
     def _log_faults(self, eventtime, faults):
-        if not any(fault["hard"] for fault in faults):
-            return
         for fault in faults:
             for flag in fault["flags"]:
                 self._pending_log_flags[flag] += 1
@@ -332,6 +339,8 @@ class HX711SBase(LoadCellSensor):
                 self._pending_log_channels[channel] += 1
             if fault["hard"]:
                 self._pending_log_hard += 1
+            elif fault["quality"] & Q_TIMING_MISS:
+                self._pending_log_timing += 1
             else:
                 self._pending_log_settling += 1
         if not self._pending_log_hard or eventtime < self._last_fault_log + 1.0:
@@ -348,9 +357,11 @@ class HX711SBase(LoadCellSensor):
             or "none"
         )
         logging.warning(
-            "%s: HX711 faults: hard=%d recovery=%d; flags=[%s]; channels=[%s]",
+            "%s: HX711 faults: hard=%d timing=%d recovery=%d;"
+            " flags=[%s]; channels=[%s]",
             self.name,
             self._pending_log_hard,
+            self._pending_log_timing,
             self._pending_log_settling,
             flag_summary,
             channel_summary,
@@ -358,6 +369,7 @@ class HX711SBase(LoadCellSensor):
         self._pending_log_flags.clear()
         self._pending_log_channels.clear()
         self._pending_log_hard = self._pending_log_settling = 0
+        self._pending_log_timing = 0
         self._last_fault_log = eventtime
 
     def _start_measurements(self):

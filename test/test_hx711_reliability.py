@@ -7,7 +7,11 @@ from klippy.extras.load_cell.hx711s import (
     Q_EXTRA_LOW,
     Q_FRAME_FORMAT,
     Q_NOT_READY,
+    Q_POST_READ_LOW,
+    Q_READ_OVERRUN,
+    Q_SATURATED,
     Q_SETTLING,
+    Q_TIMING_STREAK,
     HX711SBase,
     TimestampedBulkReader,
     quality_flags,
@@ -59,11 +63,26 @@ def make_hx711(sensor_count=2):
 
 def test_quality_classification():
     assert not quality_is_hard(Q_SETTLING)
-    assert quality_is_hard(Q_SETTLING | Q_NOT_READY)
-    assert quality_is_hard(1 << Q_CHANNEL_SHIFT)
+    # Timing misses are excluded from control data but are not faults.
+    assert not quality_is_hard(Q_SETTLING | Q_NOT_READY)
+    assert not quality_is_hard(Q_NOT_READY | Q_EXTRA_LOW | Q_POST_READ_LOW)
+    # Channel bits only locate a fault and carry no severity.
+    assert not quality_is_hard(1 << Q_CHANNEL_SHIFT)
+    # Genuine faults stay hard.
+    assert quality_is_hard(Q_READ_OVERRUN)
+    assert quality_is_hard(Q_SATURATED)
+    assert quality_is_hard(Q_FRAME_FORMAT)
+    assert quality_is_hard(Q_NOT_READY | Q_SATURATED)
+    # An MCU-escalated timing streak is a hard fault.
+    assert quality_is_hard(Q_NOT_READY | Q_TIMING_STREAK)
+    assert quality_is_hard(1 << 12)
     assert quality_flags(Q_SETTLING | Q_EXTRA_LOW) == (
         "settling",
         "extra_low",
+    )
+    assert quality_flags(Q_NOT_READY | Q_TIMING_STREAK) == (
+        "not_ready",
+        "timing_streak",
     )
 
 
@@ -71,12 +90,7 @@ def test_timestamped_conversion_keeps_fault_details_out_of_control_data():
     sensor = make_hx711()
     samples = [
         (1000, 100, 200, FRAME_TAG | Q_SETTLING),
-        (
-            2000,
-            110,
-            210,
-            FRAME_TAG | Q_NOT_READY | (1 << (Q_CHANNEL_SHIFT + 1)),
-        ),
+        (2000, 110, 210, FRAME_TAG | Q_READ_OVERRUN),
         (3000, 120, 220, FRAME_TAG),
     ]
 
@@ -87,8 +101,8 @@ def test_timestamped_conversion_keeps_fault_details_out_of_control_data():
     assert not faults[0]["hard"]
     assert faults[1]["time"] == 2.0
     assert faults[1]["hard"]
-    assert faults[1]["channels"] == (1,)
-    assert faults[1]["flags"] == ("not_ready",)
+    assert faults[1]["channels"] == ()
+    assert faults[1]["flags"] == ("read_overrun",)
     assert samples[0][0] == 3.0
     assert samples[0][1] == 120
     assert samples[0][3] == 220
@@ -100,6 +114,48 @@ def test_timestamped_conversion_keeps_fault_details_out_of_control_data():
         "valid": 1,
     }
     assert sensor._last_hard_fault == faults[1]
+
+
+def test_timing_miss_is_not_a_fault():
+    sensor = make_hx711()
+    samples = [
+        (
+            1000,
+            100,
+            200,
+            FRAME_TAG | Q_NOT_READY | (1 << (Q_CHANNEL_SHIFT + 1)),
+        ),
+        (
+            2000,
+            110,
+            210,
+            FRAME_TAG
+            | Q_EXTRA_LOW
+            | Q_POST_READ_LOW
+            | (1 << Q_CHANNEL_SHIFT),
+        ),
+        (3000, 120, 220, FRAME_TAG),
+    ]
+
+    faults = sensor._convert_samples(samples)
+
+    assert len(faults) == 2
+    assert not faults[0]["hard"]
+    assert faults[0]["channels"] == (1,)
+    assert faults[0]["flags"] == ("not_ready",)
+    assert not faults[1]["hard"]
+    assert faults[1]["channels"] == (0,)
+    assert faults[1]["flags"] == ("extra_low", "post_read_low")
+    # Timing frames stay out of control data; only the clean frame remains.
+    assert len(samples) == 1
+    assert samples[0][0] == 3.0
+    assert sensor._health == {
+        "received": 3,
+        "fault": 2,
+        "timing": 2,
+        "valid": 1,
+    }
+    assert sensor._last_hard_fault is None
 
 
 def test_untagged_wire_format_fails_closed():
@@ -156,12 +212,13 @@ class FakeLoadCell:
 
 
 def fault(time, hard):
+    quality = Q_READ_OVERRUN if hard else Q_SETTLING
     return {
         "time": time,
         "counts": (0, 0),
-        "quality": Q_NOT_READY if hard else Q_SETTLING,
-        "wire_quality": FRAME_TAG | (Q_NOT_READY if hard else Q_SETTLING),
-        "flags": ("not_ready",) if hard else ("settling",),
+        "quality": quality,
+        "wire_quality": FRAME_TAG | quality,
+        "flags": ("read_overrun",) if hard else ("settling",),
         "channels": (),
         "hard": hard,
     }

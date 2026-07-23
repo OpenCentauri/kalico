@@ -34,11 +34,17 @@
 #define HX711S_Q_READ_OVERRUN   (1 << 4)
 #define HX711S_Q_SATURATED      (1 << 5)
 #define HX711S_Q_CHANNEL_SHIFT  8
-#define HX711S_Q_PROTOCOL_FAULT (HX711S_Q_NOT_READY | HX711S_Q_EXTRA_LOW \
-                                 | HX711S_Q_POST_READ_LOW \
-                                 | HX711S_Q_READ_OVERRUN)
-#define HX711S_Q_HARD_FAULT     (HX711S_Q_PROTOCOL_FAULT \
-                                 | HX711S_Q_SATURATED)
+// Timing misses are the polling/read racing the free-running conversion
+// clock: the frame is invalid and stays out of control data, but the ADC is
+// healthy and the next poll resynchronizes.  Only a persistent streak (a
+// genuinely stuck ADC) escalates to the fault and reset path.
+#define HX711S_Q_TIMING_MISS    (HX711S_Q_NOT_READY | HX711S_Q_EXTRA_LOW \
+                                 | HX711S_Q_POST_READ_LOW)
+#define HX711S_Q_GENUINE_FAULT  (HX711S_Q_READ_OVERRUN | HX711S_Q_SATURATED)
+// Set on a timing-miss frame when a persistent streak proves a stuck ADC.
+// Bit 6 is reserved for the host-synthetic frame-format flag.
+#define HX711S_Q_TIMING_STREAK  (1 << 7)
+#define HX711S_TIMING_STREAK_LIMIT 40
 #define HX711S_FRAME_TAG        UINT32_C(0xa7110000)
 
 enum hx711s_state {
@@ -54,7 +60,7 @@ struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
     uint8_t pending_flag, sensor_count, gain_channel, sample_bytes;
-    uint8_t state, settling_frames, qualify_frames;
+    uint8_t state, settling_frames, qualify_frames, timing_streak;
     struct gpio_in sdos[MAX_SENSORS];
     struct gpio_out clks[MAX_SENSORS];
     struct sensor_bulk sb;
@@ -185,6 +191,7 @@ hx711s_begin_reset(struct hx711s_adc *h)
     h->state = HX711S_RESET;
     h->settling_frames = SETTLING_FRAMES;
     h->qualify_frames = QUALIFY_FRAMES;
+    h->timing_streak = 0;
     h->timer.waketime = timer_read_time() + timer_from_us(POWERDOWN_US);
     sched_add_timer(&h->timer);
 }
@@ -249,6 +256,14 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     }
     quality |= (uint32_t)channel_mask << HX711S_Q_CHANNEL_SHIFT;
 
+    // A persistent timing streak means a genuinely stuck ADC: tag the frame
+    // hard in-band so the host records it as a fault, then reset below.
+    uint8_t escalate = (quality & HX711S_Q_TIMING_MISS)
+                       && !(quality & HX711S_Q_GENUINE_FAULT)
+                       && h->timing_streak + 1 >= HX711S_TIMING_STREAK_LIMIT;
+    if (escalate)
+        quality |= HX711S_Q_TIMING_STREAK;
+
     // A complete sample must fit before appending it.  In the four-channel
     // case each timestamped frame is 24 bytes, while the shared bulk buffer
     // is 51 bytes: appending first when it contains 48 bytes would overrun it.
@@ -262,18 +277,34 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     // fail closed instead of interpreting shifted count words as valid data.
     append_value(h, HX711S_FRAME_TAG | quality);
 
+    if (quality & HX711S_Q_GENUINE_FAULT) {
+        h->timing_streak = 0;
+        if (h->lce)
+            load_cell_probe_report_fault_at(h->lce, capture_ticks);
+        if (quality & HX711S_Q_READ_OVERRUN)
+            hx711s_begin_reset(h);
+        return;
+    }
+    if (quality & HX711S_Q_TIMING_MISS) {
+        if (escalate) {
+            // Persistent timing failure: the ADC is genuinely stuck.
+            h->timing_streak = 0;
+            if (h->lce)
+                load_cell_probe_report_fault_at(h->lce, capture_ticks);
+            hx711s_begin_reset(h);
+        } else {
+            h->timing_streak++;
+        }
+        return;
+    }
+    h->timing_streak = 0;
     if (!quality && h->state == HX711S_ONLINE) {
         int32_t sum = 0;
         for (uint8_t i = 0; i < h->sensor_count; i++)
             sum += counts[i];
         if (h->lce)
             load_cell_probe_report_sample_at(h->lce, sum, capture_ticks);
-    } else if ((quality & HX711S_Q_HARD_FAULT) && h->lce) {
-        load_cell_probe_report_fault_at(h->lce, capture_ticks);
     }
-
-    if (quality & HX711S_Q_PROTOCOL_FAULT)
-        hx711s_begin_reset(h);
 }
 
 void
