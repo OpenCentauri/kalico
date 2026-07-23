@@ -12,7 +12,7 @@
 #include "command.h" // DECL_COMMAND
 #include "sched.h" // sched_add_timer
 #include "sensor_bulk.h" // sensor_bulk_report
-#include "load_cell_probe.h" // load_cell_probe_report_sample
+#include "load_cell_probe.h" // load_cell_probe_report_sample_at
 #include <stdint.h>
 
 #define MAX_SENSORS 4
@@ -24,8 +24,9 @@
 #define QUALIFY_FRAMES 2
 #define HX711S_OVERFLOW (1 << 1)
 
-// A frame carries raw values even when it is invalid.  The host must never
-// feed a non-zero quality frame into a tare, filter, or probe decision.
+// A frame carries raw values even when it is invalid.  After checking and
+// removing the wire-format tag, the host must never feed a non-zero quality
+// frame into a tare, filter, or probe decision.
 #define HX711S_Q_SETTLING       (1 << 0)
 #define HX711S_Q_NOT_READY      (1 << 1)
 #define HX711S_Q_EXTRA_LOW      (1 << 2)
@@ -33,6 +34,12 @@
 #define HX711S_Q_READ_OVERRUN   (1 << 4)
 #define HX711S_Q_SATURATED      (1 << 5)
 #define HX711S_Q_CHANNEL_SHIFT  8
+#define HX711S_Q_PROTOCOL_FAULT (HX711S_Q_NOT_READY | HX711S_Q_EXTRA_LOW \
+                                 | HX711S_Q_POST_READ_LOW \
+                                 | HX711S_Q_READ_OVERRUN)
+#define HX711S_Q_HARD_FAULT     (HX711S_Q_PROTOCOL_FAULT \
+                                 | HX711S_Q_SATURATED)
+#define HX711S_FRAME_TAG        UINT32_C(0xa7110000)
 
 enum hx711s_state {
     HX711S_OFF,
@@ -95,23 +102,33 @@ hx711s_set_clocks(struct hx711s_adc *h, uint8_t value)
         gpio_out_write(h->clks[i], value);
 }
 
-// Read all devices in lockstep.  SCK is high only while IRQs are masked; the
-// low phase deliberately services pending IRQs before sampling stable DOUT.
-static void
+// Read all devices in lockstep.  Sample DOUT after its rising-edge setup time
+// while SCK is high, then check the final post-read level before servicing
+// arbitrary pending IRQ work.  This keeps every decision at a defined point
+// in the data-sheet timing diagram while limiting each IRQ-off phase to 1us.
+static uint8_t
 hx711s_raw_read(struct hx711s_adc *h, uint32_t *bits_out, uint8_t num_bits)
 {
     for (uint8_t i = 0; i < h->sensor_count; i++)
         bits_out[i] = 0;
+    uint8_t post_read_low = 0;
     while (num_bits--) {
         irq_disable();
         hx711s_set_clocks(h, 1);
         hx711s_delay_noirq();
-        hx711s_set_clocks(h, 0);
-        irq_enable();
-        hx711s_delay();
         for (uint8_t i = 0; i < h->sensor_count; i++)
             bits_out[i] = (bits_out[i] << 1) | gpio_in_read(h->sdos[i]);
+        hx711s_set_clocks(h, 0);
+        if (!num_bits) {
+            hx711s_delay_noirq();
+            for (uint8_t i = 0; i < h->sensor_count; i++)
+                if (!gpio_in_read(h->sdos[i]))
+                    post_read_low |= 1 << i;
+        }
+        irq_enable();
+        hx711s_delay();
     }
+    return post_read_low;
 }
 
 static uint_fast8_t
@@ -162,6 +179,8 @@ hx711s_begin_reset(struct hx711s_adc *h)
     // list, so remove it before changing its wake time and inserting it.
     sched_del_timer(&h->timer);
     h->pending_flag = 0;
+    if (h->lce)
+        load_cell_probe_set_sensor_ready(h->lce, 0);
     hx711s_set_clocks(h, 1);
     h->state = HX711S_RESET;
     h->settling_frames = SETTLING_FRAMES;
@@ -174,36 +193,37 @@ static void
 hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
 {
     uint32_t adc[MAX_SENSORS], quality = 0;
-    int32_t counts[MAX_SENSORS];
+    int32_t counts[MAX_SENSORS] = {0};
+    uint32_t capture_ticks = timer_read_time();
     uint8_t channel_mask = hx711s_ready_mask(h);
     uint8_t extras_mask = (1 << h->gain_channel) - 1;
 
-    if (channel_mask)
+    // Never clock an ADC that says its conversion is not ready.  Doing so is
+    // outside the HX711 protocol and can turn a readiness fault into a second,
+    // misleading gain-bit fault.  Preserve a diagnostic record and recover.
+    if (channel_mask) {
         quality |= HX711S_Q_NOT_READY;
-    hx711s_delay();
-    hx711s_raw_read(h, adc, 24 + h->gain_channel);
-    hx711s_delay();
-
-    for (uint8_t i = 0; i < h->sensor_count; i++) {
-        uint32_t raw = adc[i] >> h->gain_channel;
-        if (raw & 0x800000)
-            raw |= 0xff000000;
-        counts[i] = raw;
-        if ((adc[i] & extras_mask) != extras_mask) {
-            quality |= HX711S_Q_EXTRA_LOW;
-            channel_mask |= 1 << i;
-        }
-        // After the final gain-selection pulse DOUT must remain high until
-        // the next conversion. A low line is a protocol/electrical fault,
-        // not a sample to silently hold or synthesize.
-        if (!gpio_in_read(h->sdos[i])) {
-            quality |= HX711S_Q_POST_READ_LOW;
-            channel_mask |= 1 << i;
-        }
-        if (counts[i] == INT32_C(0x007fffff)
-            || counts[i] == -INT32_C(0x00800000)) {
-            quality |= HX711S_Q_SATURATED;
-            channel_mask |= 1 << i;
+    } else {
+        uint8_t post_read_low = hx711s_raw_read(
+            h, adc, 24 + h->gain_channel);
+        for (uint8_t i = 0; i < h->sensor_count; i++) {
+            uint32_t raw = adc[i] >> h->gain_channel;
+            if (raw & 0x800000)
+                raw |= 0xff000000;
+            counts[i] = raw;
+            if ((adc[i] & extras_mask) != extras_mask) {
+                quality |= HX711S_Q_EXTRA_LOW;
+                channel_mask |= 1 << i;
+            }
+            if (post_read_low & (1 << i)) {
+                quality |= HX711S_Q_POST_READ_LOW;
+                channel_mask |= 1 << i;
+            }
+            if (counts[i] == INT32_C(0x007fffff)
+                || counts[i] == -INT32_C(0x00800000)) {
+                quality |= HX711S_Q_SATURATED;
+                channel_mask |= 1 << i;
+            }
         }
     }
 
@@ -214,37 +234,45 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     if (flags & HX711S_OVERFLOW)
         quality |= HX711S_Q_READ_OVERRUN;
 
-    if (h->state == HX711S_SETTLING || h->state == HX711S_QUALIFY) {
+    uint8_t was_qualifying = h->state == HX711S_SETTLING
+                             || h->state == HX711S_QUALIFY;
+    if (was_qualifying) {
         if (!quality && h->state == HX711S_SETTLING && !--h->settling_frames)
             h->state = HX711S_QUALIFY;
-        else if (!quality && h->state == HX711S_QUALIFY && !--h->qualify_frames)
+        else if (!quality && h->state == HX711S_QUALIFY
+                 && !--h->qualify_frames) {
             h->state = HX711S_ONLINE;
+            if (h->lce)
+                load_cell_probe_set_sensor_ready(h->lce, 1);
+        }
         quality |= HX711S_Q_SETTLING;
     }
     quality |= (uint32_t)channel_mask << HX711S_Q_CHANNEL_SHIFT;
 
     // A complete sample must fit before appending it.  In the four-channel
-    // case each frame is 20 bytes, while the shared bulk buffer is 51 bytes:
-    // appending first when it already contains 40 bytes would overrun it.
+    // case each timestamped frame is 24 bytes, while the shared bulk buffer
+    // is 51 bytes: appending first when it contains 48 bytes would overrun it.
     if (h->sb.data_count + h->sample_bytes > ARRAY_SIZE(h->sb.data))
         sensor_bulk_report(&h->sb, oid);
 
+    append_value(h, capture_ticks);
     for (uint8_t i = 0; i < h->sensor_count; i++)
         append_value(h, counts[i]);
-    append_value(h, quality);
+    // Tag the timestamped wire format. A host paired with an older MCU must
+    // fail closed instead of interpreting shifted count words as valid data.
+    append_value(h, HX711S_FRAME_TAG | quality);
 
     if (!quality && h->state == HX711S_ONLINE) {
         int32_t sum = 0;
         for (uint8_t i = 0; i < h->sensor_count; i++)
             sum += counts[i];
         if (h->lce)
-            load_cell_probe_report_sample(h->lce, sum);
-    } else if (quality && h->lce) {
-        load_cell_probe_report_fault(h->lce);
+            load_cell_probe_report_sample_at(h->lce, sum, capture_ticks);
+    } else if ((quality & HX711S_Q_HARD_FAULT) && h->lce) {
+        load_cell_probe_report_fault_at(h->lce, capture_ticks);
     }
 
-    if (quality & (HX711S_Q_NOT_READY | HX711S_Q_EXTRA_LOW
-                   | HX711S_Q_POST_READ_LOW | HX711S_Q_READ_OVERRUN))
+    if (quality & HX711S_Q_PROTOCOL_FAULT)
         hx711s_begin_reset(h);
 }
 
@@ -260,7 +288,12 @@ command_config_hx711s(uint32_t *args)
         shutdown("hx711s: gain_channel out of range 1-4");
     h->sensor_count = args[1];
     h->gain_channel = args[2];
-    h->sample_bytes = BYTES_PER_VALUE * (h->sensor_count + 1);
+    // Each frame carries its MCU capture clock, all channel counts, and a
+    // quality word.  The largest (four-channel) frame is 24 bytes, so exactly
+    // two frames fit in the shared 51-byte bulk buffer.
+    h->sample_bytes = BYTES_PER_VALUE * (h->sensor_count + 2);
+    if (h->sample_bytes > ARRAY_SIZE(h->sb.data))
+        shutdown("hx711s: sample does not fit bulk buffer");
     h->state = HX711S_OFF;
 }
 DECL_COMMAND(command_config_hx711s,
@@ -283,6 +316,7 @@ hx711s_attach_load_cell_probe(uint32_t *args)
 {
     struct hx711s_adc *h = oid_lookup(args[0], command_config_hx711s);
     h->lce = load_cell_probe_oid_lookup(args[1]);
+    load_cell_probe_set_sensor_ready(h->lce, h->state == HX711S_ONLINE);
 }
 DECL_COMMAND(hx711s_attach_load_cell_probe,
     "hx711s_attach_load_cell_probe oid=%c load_cell_probe_oid=%c");
@@ -294,8 +328,13 @@ command_query_hx711s(uint32_t *args)
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         sched_del_timer(&h->timer);
-        hx711s_set_clocks(h, 1);
+        irq_disable();
         h->state = HX711S_OFF;
+        h->pending_flag = 0;
+        irq_enable();
+        hx711s_set_clocks(h, 1);
+        if (h->lce)
+            load_cell_probe_set_sensor_ready(h->lce, 0);
         return;
     }
     sensor_bulk_reset(&h->sb);
@@ -321,7 +360,7 @@ hx711s_capture_task(void)
     uint8_t oid;
     struct hx711s_adc *h;
     foreach_oid(oid, h, command_config_hx711s) {
-        if (h->pending_flag)
+        if (h->state != HX711S_OFF && h->pending_flag)
             hx711s_read_adc(h, oid);
     }
 }

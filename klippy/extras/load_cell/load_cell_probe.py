@@ -405,6 +405,17 @@ class LoadCellProbeConfigHelper:
         self._trigger_force_param = intParamHelper(
             config, "trigger_force", default=75, minval=10, maxval=250
         )
+        # Require force to remain above the threshold for a fixed duration,
+        # independent of the ADC's configured sample rate.  The MCU reports
+        # the first crossing as contact time after the later samples confirm
+        # it was not a one-frame impulse.
+        self._trigger_confirm_time_param = floatParamHelper(
+            config,
+            "trigger_confirm_time",
+            default=0.0125,
+            minval=0.0,
+            maxval=0.100,
+        )
         self._force_safety_limit_param = intParamHelper(
             config, "force_safety_limit", minval=0, default=2000
         )
@@ -439,6 +450,9 @@ class LoadCellProbeConfigHelper:
     def get_trigger_force_grams(self, gcmd=None) -> int:
         return self._trigger_force_param.get(gcmd)
 
+    def get_trigger_confirm_time(self, gcmd=None) -> float:
+        return self._trigger_confirm_time_param.get(gcmd)
+
     def get_safety_limit_grams(self, gcmd=None) -> int:
         return self._force_safety_limit_param.get(gcmd)
 
@@ -472,7 +486,7 @@ class LoadCellProbeConfigHelper:
         safety_min = int(zero - safety_counts)
         safety_max = int(zero + safety_counts)
         # don't allow a safety range outside the sensor's real range
-        sensor_min, sensor_max = self._load_cell.get_sensor().get_range()
+        sensor_min, sensor_max = self._load_cell.saturation_range()
         if safety_min <= sensor_min or safety_max >= sensor_max:
             cmd_err = self._printer.command_error
             raise cmd_err(
@@ -508,7 +522,7 @@ class LoadCellProbeConfigHelper:
             drift_counts = int(counts_per_gram * drift_force)
             drift_min = int(tare_counts - drift_counts)
             drift_max = int(tare_counts + drift_counts)
-            sensor_min, sensor_max = self._load_cell.get_sensor().get_range()
+            sensor_min, sensor_max = self._load_cell.saturation_range()
             if drift_min <= sensor_min or drift_max >= sensor_max:
                 cmd_err = self._printer.command_error
                 raise cmd_err(
@@ -559,6 +573,9 @@ class McuLoadCellProbe:
         self._home_cmd = None
         self._query_cmd = None
         self._set_range_cmd = None
+        self._trigger_confirm_ticks = self._mcu.seconds_to_clock(
+            self._config_helper.get_trigger_confirm_time()
+        )
         self._mcu.register_config_callback(self._build_config)
         self._printer.register_event_handler("klippy:connect", self._on_connect)
 
@@ -585,7 +602,8 @@ class McuLoadCellProbe:
         )
         self._home_cmd = self._mcu.lookup_command(
             "load_cell_probe_home oid=%c trsync_oid=%c trigger_reason=%c"
-            " error_reason=%c clock=%u rest_ticks=%u timeout=%u",
+            " error_reason=%c clock=%u rest_ticks=%u timeout=%u"
+            " trigger_confirm_ticks=%u",
             cq=self._cmd_queue,
         )
 
@@ -619,6 +637,9 @@ class McuLoadCellProbe:
             self._config_helper.get_grams_per_count(),
         ]
         self._set_range_cmd.send(args)
+        self._trigger_confirm_ticks = self._mcu.seconds_to_clock(
+            self._config_helper.get_trigger_confirm_time(gcmd)
+        )
         self._sos_filter.reset_filter()
 
     def home_start(self, print_time):
@@ -634,6 +655,7 @@ class McuLoadCellProbe:
                 clock,
                 rest_ticks,
                 self.WATCHDOG_MAX,
+                self._trigger_confirm_ticks,
             ],
             reqclock=clock,
         )
@@ -1017,9 +1039,7 @@ class LoadCellEndstopWrapper:
         return self._z_offset
 
     def get_status(self, eventtime):
-        status = self._tapping_move.get_status(eventtime)
-        status.update(self._tapping_move.get_status(eventtime))
-        return status
+        return self._tapping_move.get_status(eventtime)
 
 
 class DriftFilterCalibration:
@@ -1057,6 +1077,7 @@ class DriftFilterCalibration:
 
     def calibrate(self, gcmd: GCodeCommand):
         try:
+            import numpy as np
             import scipy.signal as signal
 
             _ = signal
@@ -1175,6 +1196,8 @@ class DriftFilterCalibration:
     @staticmethod
     def _calculate_segment_slopes(force_data, sampling_rate, segment_duration):
         """Split the graph into segments and calculate a slope for each."""
+        import numpy as np
+
         segment_samples = int(segment_duration * sampling_rate)
         num_segments = len(force_data) // segment_samples
         segments = np.array_split(force_data, num_segments)
@@ -1200,7 +1223,7 @@ class DriftFilterCalibration:
 
     def _run_calibration(
         self,
-        force_data: np.ndarray,
+        force_data,
         sampling_rate: float,
         segment_duration: float,
         slope_percentile: float,
@@ -1210,6 +1233,8 @@ class DriftFilterCalibration:
         max_drift_rate: float,
         gcmd: GCodeCommand,
     ):
+        import numpy as np
+
         current_cutoff = cutoff
         while current_cutoff <= max_cutoff_frequency:
             filtered_data = self._apply_drift_filter(
@@ -1288,6 +1313,8 @@ class PullbackDistanceCalibration:
         pass
 
     def calibrate(self, gcmd: GCodeCommand):
+        import numpy as np
+
         self._gcmd = gcmd
         gcmd.respond_info("Starting pullback_distance calibration...")
         bed_mesh: BedMesh = self._printer.lookup_object(

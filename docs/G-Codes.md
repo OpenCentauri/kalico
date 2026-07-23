@@ -1084,6 +1084,7 @@ corresponding settings from the
 [`[load_cell_probe]`](./Config_Reference.md#load_cell_probe) configuration:
 - `FORCE_SAFETY_LIMIT=<grams>`
 - `TRIGGER_FORCE=<grams>`
+- `TRIGGER_CONFIRM_TIME=<seconds>`
 - `DRIFT_FILTER_CUTOFF_FREQUENCY=<frequency_hz>`
 - `DRIFT_FILTER_DELAY=<1|2>`
 - `BUZZ_FILTER_CUTOFF_FREQUENCY=<frequency_hz>`
@@ -1091,6 +1092,7 @@ corresponding settings from the
 - `NOTCH_FILTER_FREQUENCIES=<list of frequency_hz>`
 - `NOTCH_FILTER_QUALITY=<quality>`
 - `TARE_TIME=<seconds>`
+- `TARE_SAMPLES=<count>`
 - `PULLBACK_DISTANCE=<mm>`
 - `PULLBACK_SPEED=<mm/s>`
 - `MIN_TAP_QUALITY=<percent>`

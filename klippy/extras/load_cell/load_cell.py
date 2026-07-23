@@ -441,7 +441,19 @@ class LoadCellSampleCollector:
     def _on_samples(self, msg):
         if not self.is_started:
             return False  # already stopped, ignore
-        self._errors += msg["errors"]
+        faults = msg.get("faults")
+        if faults:
+            for fault in faults:
+                fault_time = fault["time"]
+                if self.min_time <= fault_time <= self.max_time:
+                    if fault.get("hard", True):
+                        self._errors += 1
+                if fault_time > self.max_time:
+                    self._complete()
+        elif msg["errors"]:
+            # Sensors without timestamped fault records retain the legacy
+            # batch-wide error behavior.
+            self._errors += msg["errors"]
         self._overflows += msg["overflows"]
         samples = msg["data"]
         for sample in samples:
@@ -477,10 +489,11 @@ class LoadCellSampleCollector:
             self._completion = self._reactor.completion()
             result = self._completion.wait(waketime=wake_time)
             if result is None:
-                self._finish_collecting()
+                _samples, errors = self._finish_collecting()
+                error_count, overflow_count = errors if errors else (0, 0)
                 raise self._printer.command_error(
-                    f"LoadCellSampleCollector timed out! Errors: {self._errors},"
-                    f" Overflows: {self._overflows}"
+                    f"LoadCellSampleCollector timed out! Errors: "
+                    f"{error_count}, Overflows: {overflow_count}"
                 )
         return self._finish_collecting()
 
@@ -661,6 +674,7 @@ class LoadCell:
         data = msg.get("data")
         errors = msg.get("errors")
         overflows = msg.get("overflows")
+        faults = msg.get("faults", [])
         if data is None:
             return None
         samples = []
@@ -688,8 +702,10 @@ class LoadCell:
                 sample.append(counts)
             samples.append(sample)
         msg = {
-            "data": samples, "errors": errors, "overflows": overflows,
-            "faults": [],
+            "data": samples,
+            "errors": errors,
+            "overflows": overflows,
+            "faults": faults,
         }
         self.clients.send(msg)
         return True
@@ -816,9 +832,10 @@ class LoadCell:
 
     def validate_samples(self, samples, errors):
         if errors:
+            error_count, overflow_count = errors
             raise self.printer.command_error(
-                "Sensor reported %i errors while sampling"
-                % (errors[0] + errors[1])
+                "Sensor reported %i acquisition errors and %i bulk "
+                "overflows while sampling" % (error_count, overflow_count)
             )
         # check individual channels for saturated readings
         range_min, range_max = self.channel_saturation_range()
@@ -909,4 +926,7 @@ class LoadCell:
                 "tare_force": self.tare_force,
             }
         )
+        get_health = getattr(self.sensor, "get_health", None)
+        if get_health is not None:
+            status["sensor_health"] = get_health()
         return status

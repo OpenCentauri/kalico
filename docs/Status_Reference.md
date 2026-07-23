@@ -367,6 +367,9 @@ The following information is available for each `[load_cell name]`:
 - 'force_g_per_channel': The force in grams, averaged over the last polling period, one entry per channel
 - 'min_force_g': The minimum force in grams, over the last polling period.
 - 'max_force_g': The maximum force in grams, over the last polling period.
+- 'sensor_health': For sensors that report acquisition health, cumulative
+  frame, quality-flag, and per-channel fault counters together with the latest
+  hard fault and latest batch summary.
 
 ## load_cell_probe
 

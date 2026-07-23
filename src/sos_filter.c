@@ -165,6 +165,8 @@ command_sos_filter_activate(uint32_t *args)
         shutdown("Filter section count larger than max_sections");
     sf->n_sections = n_sections;
     const uint8_t coeff_int_bits = args[2];
+    if (coeff_int_bits < 1 || coeff_int_bits > 30)
+        shutdown("Filter coefficient integer bits must be 1-30");
     sf->coeff_frac_bits = (31 - coeff_int_bits);
     sf->coeff_rounding  = (1 << (sf->coeff_frac_bits - 1));
     // mark filter as ready to use

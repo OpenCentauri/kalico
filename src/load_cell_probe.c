@@ -37,8 +37,6 @@ typedef int64_t fixedQ48_t;
 #define ERROR_OVERFLOW 1
 #define ERROR_WATCHDOG 2
 #define ERROR_ADC_INVALID 3
-#define TRIGGER_CONFIRM_SAMPLES 2
-
 // Flags
 enum {FLAG_IS_HOMING = 1 << 0
     , FLAG_IS_HOMING_TRIGGER = 1 << 1
@@ -48,12 +46,13 @@ enum {FLAG_IS_HOMING = 1 << 0
 // Endstop Structure
 struct load_cell_probe {
     struct timer time;
-    uint32_t trigger_grams, trigger_ticks, last_sample_ticks, rest_ticks;
+    uint32_t trigger_grams, trigger_ticks, first_trigger_ticks;
+    uint32_t last_sample_ticks, rest_ticks, trigger_confirm_ticks;
     uint32_t homing_start_time;
     struct trsync *ts;
     int32_t safety_counts_min, safety_counts_max, tare_counts;
     uint8_t flags, trigger_reason, error_reason, watchdog_max
-            , watchdog_count, trigger_count;
+            , watchdog_count, trigger_count, sensor_ready;
     fixedQ16_t trigger_grams_fixed;
     fixedQ2_t grams_per_count;
     struct sos_filter *sf;
@@ -103,61 +102,70 @@ clear_flag(uint8_t mask, struct load_cell_probe *lcp)
     lcp->flags &= ~mask;
 }
 
-void
-try_trigger(struct load_cell_probe *lcp, uint32_t ticks)
+static void
+trigger_terminal(struct load_cell_probe *lcp, uint8_t reason, uint32_t ticks)
 {
-    uint8_t is_homing_triggered = is_flag_set(FLAG_IS_HOMING_TRIGGER, lcp);
-    if (!is_homing_triggered) {
-        // the first triggering sample when homing sets the trigger time
-        lcp->trigger_ticks = ticks;
-        // this flag latches until a reset, disabling further triggering
-        set_flag(FLAG_IS_HOMING_TRIGGER, lcp);
-        trsync_do_trigger(lcp->ts, lcp->trigger_reason);
-    }
+    if (!is_flag_set(FLAG_IS_HOMING, lcp)
+        || is_flag_set(FLAG_IS_HOMING_TRIGGER, lcp))
+        return;
+    lcp->trigger_ticks = ticks;
+    set_flag(FLAG_IS_HOMING_TRIGGER, lcp);
+    trsync_do_trigger(lcp->ts, reason);
 }
 
-void
-trigger_error(struct load_cell_probe *lcp, uint8_t error_code)
+static void
+try_trigger(struct load_cell_probe *lcp, uint32_t ticks)
 {
-    trsync_do_trigger(lcp->ts, lcp->error_reason + error_code);
+    trigger_terminal(lcp, lcp->trigger_reason, ticks);
+}
+
+static void
+trigger_error(struct load_cell_probe *lcp, uint8_t error_code, uint32_t ticks)
+{
+    trigger_terminal(lcp, lcp->error_reason + error_code, ticks);
+}
+
+// Return true only after the scheduled homing start time.  Samples and faults
+// must use the same gate so an old bulk/capture event cannot abort a future
+// move before that move has started.
+static uint8_t
+probe_is_active(struct load_cell_probe *lcp, uint32_t ticks)
+{
+    if (!is_flag_set(FLAG_IS_HOMING, lcp)
+        || is_flag_set(FLAG_IS_HOMING_TRIGGER, lcp))
+        return 0;
+    if (is_flag_set(FLAG_AWAIT_HOMING, lcp)
+        && timer_is_before(ticks, lcp->homing_start_time))
+        return 0;
+    clear_flag(FLAG_AWAIT_HOMING, lcp);
+    return 1;
 }
 
 // Used by Sensors to report new raw ADC sample
 void
-load_cell_probe_report_sample(struct load_cell_probe *lcp
-                                , const int32_t sample)
+load_cell_probe_report_sample_at(struct load_cell_probe *lcp
+                                , const int32_t sample, uint32_t ticks)
 {
-    // only process samples when homing
-    uint8_t is_homing = is_flag_set(FLAG_IS_HOMING, lcp);
-    if (!is_homing) {
+    if (!probe_is_active(lcp, ticks))
         return;
-    }
 
     // save new sample
-    uint32_t ticks = timer_read_time();
     lcp->last_sample_ticks = ticks;
     lcp->watchdog_count = 0;
-
-    // do not trigger before homing start time
-    uint8_t await_homing = is_flag_set(FLAG_AWAIT_HOMING, lcp);
-    if (await_homing && timer_is_before(ticks, lcp->homing_start_time)) {
-        return;
-    }
-    clear_flag(FLAG_AWAIT_HOMING, lcp);
 
     // check for safety limit violations
     const uint8_t is_safety_trigger = sample <= lcp->safety_counts_min
                                         || sample >= lcp->safety_counts_max;
     // too much force, this is an error while homing
     if (is_safety_trigger) {
-        trigger_error(lcp, ERROR_SAFETY_RANGE);
+        trigger_error(lcp, ERROR_SAFETY_RANGE, ticks);
         return;
     }
 
     // convert sample to grams
     const fixedQ48_t raw_grams = counts_to_grams(lcp, sample);
     if (overflows_int32(raw_grams)) {
-        trigger_error(lcp, ERROR_OVERFLOW);
+        trigger_error(lcp, ERROR_OVERFLOW, ticks);
         return;
     }
 
@@ -172,19 +180,36 @@ load_cell_probe_report_sample(struct load_cell_probe *lcp
         lcp->trigger_count = 0;
         return;
     }
-    // Two consecutive qualified, filtered samples prevent a remaining
-    // one-frame impulse from ending a move. At 80 SPS this adds <=12.5ms.
-    if (lcp->trigger_count < TRIGGER_CONFIRM_SAMPLES)
-        lcp->trigger_count++;
-    if (lcp->trigger_count >= TRIGGER_CONFIRM_SAMPLES)
-        try_trigger(lcp, lcp->last_sample_ticks);
+    if (!lcp->trigger_count) {
+        lcp->trigger_count = 1;
+        lcp->first_trigger_ticks = ticks;
+    }
+    uint32_t confirm_at = lcp->first_trigger_ticks
+                          + lcp->trigger_confirm_ticks;
+    if (!timer_is_before(ticks, confirm_at))
+        // The first crossing is the best estimate of physical contact.  The
+        // later samples only confirm that it was not a one-frame impulse.
+        try_trigger(lcp, lcp->first_trigger_ticks);
 }
 
 void
-load_cell_probe_report_fault(struct load_cell_probe *lcp)
+load_cell_probe_report_sample(struct load_cell_probe *lcp, const int32_t sample)
 {
-    if (is_flag_set(FLAG_IS_HOMING, lcp))
-        trigger_error(lcp, ERROR_ADC_INVALID);
+    load_cell_probe_report_sample_at(lcp, sample, timer_read_time());
+}
+
+void
+load_cell_probe_report_fault_at(struct load_cell_probe *lcp
+                                , uint32_t sample_ticks)
+{
+    if (probe_is_active(lcp, sample_ticks))
+        trigger_error(lcp, ERROR_ADC_INVALID, sample_ticks);
+}
+
+void
+load_cell_probe_set_sensor_ready(struct load_cell_probe *lcp, uint8_t is_ready)
+{
+    lcp->sensor_ready = !!is_ready;
 }
 
 // Timer callback that monitors for timeouts
@@ -200,8 +225,13 @@ watchdog_event(struct timer *t)
         return SF_DONE;
     }
 
+    if (!lcp->sensor_ready) {
+        trigger_error(lcp, ERROR_ADC_INVALID, t->waketime);
+        return SF_DONE;
+    }
     if (lcp->watchdog_count > lcp->watchdog_max) {
-        trigger_error(lcp, ERROR_WATCHDOG);
+        trigger_error(lcp, ERROR_WATCHDOG, t->waketime);
+        return SF_DONE;
     }
     lcp->watchdog_count += 1;
 
@@ -216,7 +246,7 @@ set_endstop_range(struct load_cell_probe *lcp
                 , int32_t tare_counts, uint32_t trigger_grams
                 , fixedQ2_t grams_per_count)
 {
-    if (!(safety_counts_max >= safety_counts_min)) {
+    if (safety_counts_max <= safety_counts_min) {
         shutdown("Safety range reversed");
     }
     if (trigger_grams > MAX_TRIGGER_GRAMS) {
@@ -224,7 +254,7 @@ set_endstop_range(struct load_cell_probe *lcp
     }
     // grams_per_count must be a positive fraction in Q2 format
     const fixedQ2_t one = 1UL << FIXEDQ2_FRAC_BITS;
-    if (grams_per_count < 0 || grams_per_count >= one) {
+    if (grams_per_count <= 0 || grams_per_count >= one) {
         shutdown("grams_per_count is invalid");
     }
     lcp->safety_counts_min = safety_counts_min;
@@ -246,8 +276,8 @@ command_config_load_cell_probe(uint32_t *args)
     lcp->watchdog_max = 0;
     lcp->watchdog_count = 0;
     lcp->trigger_count = 0;
+    lcp->sensor_ready = 1;
     lcp->sf = sos_filter_oid_lookup(args[1]);
-    set_endstop_range(lcp, 0, 0, 0, 0, 0);
 }
 DECL_COMMAND(command_config_load_cell_probe, "config_load_cell_probe"
                                                " oid=%c sos_filter_oid=%c");
@@ -294,6 +324,7 @@ command_load_cell_probe_home(uint32_t *args)
     lcp->homing_start_time = args[4];
     lcp->rest_ticks = args[5];
     lcp->watchdog_max = args[6];
+    lcp->trigger_confirm_ticks = args[7];
     lcp->watchdog_count = 0;
     lcp->trigger_count = 0;
     lcp->time.func = watchdog_event;
@@ -303,7 +334,8 @@ command_load_cell_probe_home(uint32_t *args)
 }
 DECL_COMMAND(command_load_cell_probe_home,
              "load_cell_probe_home oid=%c trsync_oid=%c trigger_reason=%c"
-             " error_reason=%c clock=%u rest_ticks=%u timeout=%u");
+             " error_reason=%c clock=%u rest_ticks=%u timeout=%u"
+             " trigger_confirm_ticks=%u");
 
 void
 command_load_cell_probe_query_state(uint32_t *args)

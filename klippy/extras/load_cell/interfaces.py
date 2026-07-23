@@ -17,6 +17,10 @@ class AdcFault(TypedDict):
     time: float
     counts: tuple[int, ...]
     quality: int
+    wire_quality: int
+    flags: tuple[str, ...]
+    channels: tuple[int, ...]
+    hard: bool
 
 
 class BulkAdcData(TypedDict):
