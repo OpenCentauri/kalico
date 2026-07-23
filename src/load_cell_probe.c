@@ -156,11 +156,6 @@ load_cell_probe_report_sample_at(struct load_cell_probe *lcp
     // check for safety limit violations
     const uint8_t is_safety_trigger = sample <= lcp->safety_counts_min
                                         || sample >= lcp->safety_counts_max;
-    // too much force, this is an error while homing
-    if (is_safety_trigger) {
-        trigger_error(lcp, ERROR_SAFETY_RANGE, ticks);
-        return;
-    }
 
     // convert sample to grams
     const fixedQ48_t raw_grams = counts_to_grams(lcp, sample);
@@ -176,20 +171,34 @@ load_cell_probe_report_sample_at(struct load_cell_probe *lcp
     int64_t magnitude = filtered_grams;
     if (magnitude < 0)
         magnitude = -magnitude;
-    if (magnitude < lcp->trigger_grams_fixed) {
-        lcp->trigger_count = 0;
+    if (magnitude >= lcp->trigger_grams_fixed) {
+        // Above threshold: physical contact in progress.  The first sample of
+        // a contact streak must still pass the safety gate, so a lost tare
+        // or a gross single-sample spike errors out.  Once a confirm is
+        // armed it owns the outcome: a fast genuine ramp crosses the drift
+        // band within a sample or two, and must be allowed to finish the
+        // confirm window instead of dying as a safety error first.
+        if (!lcp->trigger_count) {
+            if (is_safety_trigger) {
+                trigger_error(lcp, ERROR_SAFETY_RANGE, ticks);
+                return;
+            }
+            lcp->trigger_count = 1;
+            lcp->first_trigger_ticks = ticks;
+        }
+        const uint32_t confirm_at = lcp->first_trigger_ticks
+                                    + lcp->trigger_confirm_ticks;
+        if (!timer_is_before(ticks, confirm_at))
+            // The first crossing is the best estimate of physical contact.
+            // The later samples only confirm it was not a one-frame impulse.
+            try_trigger(lcp, lcp->first_trigger_ticks);
         return;
     }
-    if (!lcp->trigger_count) {
-        lcp->trigger_count = 1;
-        lcp->first_trigger_ticks = ticks;
-    }
-    uint32_t confirm_at = lcp->first_trigger_ticks
-                          + lcp->trigger_confirm_ticks;
-    if (!timer_is_before(ticks, confirm_at))
-        // The first crossing is the best estimate of physical contact.  The
-        // later samples only confirm that it was not a one-frame impulse.
-        try_trigger(lcp, lcp->first_trigger_ticks);
+    // Below threshold: an armed confirm dies here, and the drift band still
+    // applies while no contact is being confirmed.
+    lcp->trigger_count = 0;
+    if (is_safety_trigger)
+        trigger_error(lcp, ERROR_SAFETY_RANGE, ticks);
 }
 
 void
