@@ -338,6 +338,9 @@ def make_probe_runner(outcomes):
 class FakePrimitiveSensor:
     def __init__(self, sensor_type="hx711s"):
         self.sensor_type = sensor_type
+        self.max_tolerated_overflows = (
+            2 if sensor_type == "hx711s" else 0
+        )
 
 
 class FakePrimitiveLoadCell:
@@ -350,6 +353,14 @@ class FakePrimitiveLoadCell:
         self.validated.append((samples, errors))
         if errors:
             error_count, overflow_count = errors
+            if (
+                error_count == 0
+                and overflow_count <= self.sensor.max_tolerated_overflows
+            ):
+                # Mirrors LoadCell.validate_samples: a small number of bulk
+                # overflows on a timestamped sensor is a known gap, not
+                # silent corruption, and is tolerated without a retry.
+                return
             raise ProbeCommandError(
                 "Sensor reported %i acquisition errors and %i bulk "
                 "overflows while sampling" % (error_count, overflow_count)
@@ -512,6 +523,40 @@ def test_probe_does_not_retry_collector_bulk_overflow():
         assert "1 bulk overflows" in str(e)
     else:
         assert False, "bulk overflow should remain a hard failure"
+
+    assert probe.retracts == 0
+    assert len(probe.moves) == 1
+    assert retry_session.evaluated == []
+
+
+def test_probe_tolerates_single_collector_bulk_overflow():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives()
+    probe = make_probe_runner([collector_error_probe(primitives, (0, 1))])
+
+    probe._run_probe_with_retries(5.0, retry_session, gcmd)
+
+    # A lone bulk overflow on the timestamped hx711 stream is a known gap,
+    # not corruption: the probe succeeds without spending a retry.
+    assert primitives._load_cell.validated == [([], (0, 1))]
+    assert probe.retracts == 0
+    assert len(probe.moves) == 1
+    assert retry_session.evaluated == [True]
+
+
+def test_probe_does_not_tolerate_large_collector_bulk_overflow():
+    gcmd = FakeGcmd()
+    retry_session = FakeProbeRetrySession()
+    primitives = make_load_cell_primitives()
+    probe = make_probe_runner([collector_error_probe(primitives, (0, 3))])
+
+    try:
+        probe._run_probe_with_retries(5.0, retry_session, gcmd)
+    except ProbeCommandError as e:
+        assert "3 bulk overflows" in str(e)
+    else:
+        assert False, "losing 3 frames in one session should stay fatal"
 
     assert probe.retracts == 0
     assert len(probe.moves) == 1

@@ -833,10 +833,21 @@ class LoadCell:
     def validate_samples(self, samples, errors):
         if errors:
             error_count, overflow_count = errors
-            raise self.printer.command_error(
-                "Sensor reported %i acquisition errors and %i bulk "
-                "overflows while sampling" % (error_count, overflow_count)
-            )
+            # A rare lost bulk message is survivable for sensors whose
+            # frames are individually timestamped: the gap is known, not
+            # silent corruption. Anything larger stays fatal.
+            tolerated = getattr(self.sensor, "max_tolerated_overflows", 0)
+            if error_count == 0 and overflow_count <= tolerated:
+                logging.warning(
+                    "load_cell: tolerating %i bulk overflow(s) this "
+                    "sampling session",
+                    overflow_count,
+                )
+            else:
+                raise self.printer.command_error(
+                    "Sensor reported %i acquisition errors and %i bulk "
+                    "overflows while sampling" % (error_count, overflow_count)
+                )
         # check individual channels for saturated readings
         range_min, range_max = self.channel_saturation_range()
         first_channel_col = SampleStructure.channel_counts_col(0)

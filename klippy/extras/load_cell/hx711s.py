@@ -142,6 +142,13 @@ class TimestampedBulkReader:
 
 
 class HX711SBase(LoadCellSensor):
+    # This sensor's frames are individually timestamped, so a rare lost bulk
+    # message is a known gap rather than silent corruption: tare uses a
+    # median over many frames and tap data is shape-validated downstream.
+    # LoadCell.validate_samples tolerates up to this many bulk overflows
+    # per session; larger losses still fail the command.
+    max_tolerated_overflows = 2
+
     def __init__(
         self,
         config,
