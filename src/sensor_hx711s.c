@@ -157,6 +157,10 @@ append_value(struct hx711s_adc *h, uint32_t value)
 static void
 hx711s_begin_reset(struct hx711s_adc *h)
 {
+    // A runtime frame fault reaches here from task context while the polling
+    // timer is still linked.  Re-adding that timer corrupts the scheduler
+    // list, so remove it before changing its wake time and inserting it.
+    sched_del_timer(&h->timer);
     h->pending_flag = 0;
     hx711s_set_clocks(h, 1);
     h->state = HX711S_RESET;
@@ -287,9 +291,9 @@ void
 command_query_hx711s(uint32_t *args)
 {
     struct hx711s_adc *h = oid_lookup(args[0], command_config_hx711s);
-    sched_del_timer(&h->timer);
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
+        sched_del_timer(&h->timer);
         hx711s_set_clocks(h, 1);
         h->state = HX711S_OFF;
         return;
