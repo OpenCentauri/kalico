@@ -203,9 +203,22 @@ hx711s_read_adc(struct hx711s_chip *chip)
 {
     struct hx711s_adc *hx711s = chip->adc;
 
-    // Read from sensor
+    // Read from sensor. A conversion that latches during the transfer
+    // leaves DOUT low again right after the final clock, so the frame
+    // just read may be torn: discard it and hold the previous value for
+    // this round rather than re-read in-window and risk racing the next
+    // conversion. (Same acquisition contract as Prusa HX717, Linux IIO
+    // hx711 and upstream Klipper hx71x: never consume a raced frame.)
     uint_fast8_t gain_channel = hx711s->gain_channel;
     uint32_t adc = hx711s_raw_read(chip->dout, chip->sclk, 24 + gain_channel);
+    if (!gpio_in_read(chip->dout)) {
+        // torn frame: hold the previous value for this round
+        irq_disable();
+        chip->flags = 0;
+        irq_enable();
+        chip->bad_frame = 1;
+        return;
+    }
 
     // Clear pending flag (and note if an overflow occurred)
     irq_disable();
