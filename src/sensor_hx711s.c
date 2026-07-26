@@ -41,6 +41,7 @@ struct hx711s_chip {
 struct hx711s_adc {
     uint8_t gain_channel;   // the gain+channel selection (1-4)
     uint8_t sensor_count;   // number of chips in use (1-4)
+    uint8_t torn_retries;   // re-read attempts on a torn frame
     uint8_t sample_bytes;   // bytes in one multi-channel sample
     uint8_t chip_mask;      // bit per configured chip
     uint8_t have_counts;    // chips that have produced a reading
@@ -203,9 +204,28 @@ hx711s_read_adc(struct hx711s_chip *chip)
 {
     struct hx711s_adc *hx711s = chip->adc;
 
-    // Read from sensor
+    // Read from sensor, re-reading (bounded) if a conversion latched
+    // during the transfer: a fresh conversion leaves DOUT low again right
+    // after the final clock, so the frame just read may be torn. The new
+    // conversion is already complete, so an immediate re-read is valid.
+    // (Same acquisition contract as Prusa HX717, Linux IIO hx711 and
+    // upstream Klipper hx71x: never consume a raced frame.)
     uint_fast8_t gain_channel = hx711s->gain_channel;
-    uint32_t adc = hx711s_raw_read(chip->dout, chip->sclk, 24 + gain_channel);
+    uint32_t adc;
+    uint_fast8_t tries = 0;
+    for (;;) {
+        adc = hx711s_raw_read(chip->dout, chip->sclk, 24 + gain_channel);
+        if (gpio_in_read(chip->dout))
+            break; // DOUT idles high: nothing latched mid-read
+        if (++tries > hx711s->torn_retries) {
+            // still re-latching: hold the previous value for this round
+            irq_disable();
+            chip->flags = 0;
+            irq_enable();
+            chip->bad_frame = 1;
+            return;
+        }
+    }
 
     // Clear pending flag (and note if an overflow occurred)
     irq_disable();
@@ -261,6 +281,7 @@ command_config_hx711s(uint32_t *args)
         shutdown("HX711S gain/channel out of range 1-4");
     }
     hx711s->gain_channel = gain_channel;
+    hx711s->torn_retries = 2; // default; host may override via set_tuning
     for (uint8_t i = 0; i < sensor_count; i++) {
         struct hx711s_chip *chip = &hx711s->chips[i];
         chip->timer.func = hx711s_event;
@@ -270,6 +291,16 @@ command_config_hx711s(uint32_t *args)
 }
 DECL_COMMAND(command_config_hx711s, "config_hx711s oid=%c sensor_count=%c"
              " gain_channel=%c");
+
+void
+command_hx711s_set_tuning(uint32_t *args)
+{
+    uint8_t oid = args[0];
+    struct hx711s_adc *hx711s = oid_lookup(oid, command_config_hx711s);
+    hx711s->torn_retries = args[1];
+}
+DECL_COMMAND(command_hx711s_set_tuning,
+             "hx711s_set_tuning oid=%c torn_retries=%c");
 
 // Assign the pins of one chip
 void

@@ -72,6 +72,8 @@ class HX711SBase(LoadCellSensor):
         self.gain_channel = int(
             config.getchoice("gain", gain_options, default=default_gain)
         )
+        self.torn_retries = config.getint("torn_retries", 2,
+                                          minval=0, maxval=8)
         self.oid = mcu.create_oid()
         ## Bulk Sensor Setup
         # Clock tracking
@@ -102,6 +104,10 @@ class HX711SBase(LoadCellSensor):
             )
         mcu.add_config_cmd(
             f"query_hx711s oid={self.oid} rest_ticks=0", on_restart=True
+        )
+        mcu.add_config_cmd(
+            f"hx711s_set_tuning oid={self.oid}"
+            f" torn_retries={self.torn_retries}"
         )
         mcu.register_config_callback(self._build_config)
 

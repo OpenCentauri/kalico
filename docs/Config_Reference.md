@@ -6094,6 +6094,10 @@ sclk_pins:
 #   Valid values are 80 or 10. The default is 80. This must match the hardware
 #   wiring of the RATE pin, which is shared by all chips. The sample rate
 #   cannot be changed in software.
+#torn_retries: 2
+#   Re-read attempts when a conversion latches during a frame transfer
+#   (torn frame) before the previous value is held for that round. The
+#   default is 2. It is rare to customize this value.
 ```
 
 #### HX717S
