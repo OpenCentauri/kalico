@@ -20,7 +20,24 @@
 #define SAMPLE_ERROR_DESYNC (1L << 31)
 #define SAMPLE_ERROR_READ_TOO_LONG (1L << 30)
 #define SAMPLE_ERROR_TORN_READ (1L << 29)
+#define SAMPLE_ERROR_RECOVERED (1L << 28)
 #define HX711S_OVERFLOW (1 << 1)
+
+// Read-on-DRDY recovery design (see HX711F datasheet and the reference
+// drivers cited in hx711s_read_adc): a frame that raced a conversion is
+// re-read on the next DRDY instead of being consumed or discarded; a
+// protocol desync is cleared by an in-driver power cycle with the
+// datasheet-mandated settling conversions discarded. Neither condition
+// reaches the host as a fatal error.
+#define HX711S_MAX_TORN_RETRIES 2
+#define HX711S_SETTLING_FRAMES 4  // datasheet: settling conversions at 80SPS
+#define HX711S_STUCK_US 31000     // ~2.5 conversion periods at 80 SPS
+
+// recovery_state values
+#define RECOVERY_NONE 0
+#define RECOVERY_PD_HIGH 1   // SCK held high: power-down pulse in progress
+#define RECOVERY_WAKE_WAIT 2 // chips woken, waiting out the 50ms settle
+#define RECOVERY_SETTLING 3  // discarding the settling conversions
 
 // A corrupt chip frame can pass the framing checks yet carry a value
 // hundreds of thousands of counts from the truth. Real contact force moves
@@ -32,11 +49,17 @@ struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
     uint32_t last_error;
+    uint32_t not_ready_since;
     int32_t last_good_counts[MAX_SENSORS];
     int32_t pending_counts[MAX_SENSORS];
+    uint16_t torn_retry_total;
+    uint16_t recovered_total;
     uint8_t have_last_counts;
     uint8_t have_pending_counts;
     uint8_t pending_flag;
+    uint8_t recovery_state;
+    uint8_t settle_remaining;
+    uint8_t torn_retry_count;
     uint8_t sensor_count;
     uint8_t gain_channel;   // extra clock pulses: chip type + gain selection
     uint8_t sample_bytes;   // sensor_count * BYTES_PER_SAMPLE
@@ -47,6 +70,8 @@ struct hx711s_adc {
 };
 
 static struct task_wake wake_hx711s;
+
+static void hx711s_start_recovery(struct hx711s_adc *h);
 
 
 /****************************************************************
@@ -128,17 +153,71 @@ hx711s_event(struct timer *timer)
 {
     struct hx711s_adc *h = container_of(timer, struct hx711s_adc, timer);
     uint32_t rest_ticks = h->rest_ticks;
+
+    // Recovery state machine. Power-down per HX711F datasheet ("when PD_SCK
+    // is high for more than 60us the chip enters power down mode"); after
+    // wake the output needs the datasheet settling time before data is
+    // trusted, so frames are discarded in the read task.
+    if (h->recovery_state == RECOVERY_PD_HIGH) {
+        for (uint8_t i = 0; i < h->sensor_count; i++)
+            gpio_out_write(h->clks[i], 0); // release power down
+        h->recovery_state = RECOVERY_WAKE_WAIT;
+        h->timer.waketime += timer_from_us(50000);
+        return SF_RESCHEDULE;
+    }
+    if (h->recovery_state == RECOVERY_WAKE_WAIT) {
+        h->recovery_state = RECOVERY_SETTLING;
+        h->timer.waketime += rest_ticks;
+        return SF_RESCHEDULE;
+    }
+    if (h->recovery_state == RECOVERY_SETTLING) {
+        if (!h->pending_flag && hx711s_is_data_ready(h)) {
+            h->pending_flag = 1;
+            sched_wake_task(&wake_hx711s);
+        }
+        h->timer.waketime += rest_ticks;
+        return SF_RESCHEDULE;
+    }
+
     if (h->pending_flag) {
         h->sb.possible_overflows++;
         h->pending_flag |= HX711S_OVERFLOW;
         rest_ticks *= 4;
     } else if (hx711s_is_data_ready(h)) {
+        h->not_ready_since = 0;
         h->pending_flag = 1;
         sched_wake_task(&wake_hx711s);
         rest_ticks *= 8;
+    } else {
+        // No DRDY for ~2.5 conversion periods means a chip wedged (its
+        // oscillator free-runs, so silence is never legitimate). Recover
+        // in-driver rather than escalating a dead stream to the host.
+        uint32_t now = timer_read_time();
+        if (!h->not_ready_since)
+            h->not_ready_since = now;
+        else if (now - h->not_ready_since > timer_from_us(HX711S_STUCK_US))
+            hx711s_start_recovery(h);
     }
     h->timer.waketime += rest_ticks;
     return SF_RESCHEDULE;
+}
+
+// Power-cycle all chips and re-arm acquisition. A desynced gain-selection
+// state is only cleared this way (HX711F datasheet, power-down control);
+// Elegoo's stock strain-gauge firmware performs the same recovery.
+static void
+hx711s_start_recovery(struct hx711s_adc *h)
+{
+    for (uint8_t i = 0; i < h->sensor_count; i++)
+        gpio_out_write(h->clks[i], 1); // SCK high >60us: power down
+    h->recovery_state = RECOVERY_PD_HIGH;
+    h->settle_remaining = HX711S_SETTLING_FRAMES;
+    h->pending_flag = 0;
+    h->have_last_counts = 0;
+    h->have_pending_counts = 0;
+    h->not_ready_since = 0;
+    h->torn_retry_count = 0;
+    h->timer.waketime = timer_read_time() + timer_from_us(1000);
 }
 
 static void
@@ -160,6 +239,29 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
     uint32_t adc[MAX_SENSORS];
     uint32_t sample_error = 0;
 
+    // During recovery the datasheet requires discarding the settling
+    // conversions after a power cycle (4 at 80 SPS); nothing is emitted
+    // until they are done, then the host gets one RECOVERED marker.
+    if (h->recovery_state == RECOVERY_SETTLING) {
+        uint32_t junk[MAX_SENSORS];
+        hx711s_raw_read(h, junk, 24 + gain_channel);
+        irq_disable();
+        h->pending_flag = 0;
+        irq_enable();
+        if (--h->settle_remaining == 0) {
+            h->recovery_state = RECOVERY_NONE;
+            h->recovered_total++;
+            append_sample(h, SAMPLE_ERROR_RECOVERED);
+            append_sample(h, (int32_t)h->torn_retry_total);
+            append_sample(h, (int32_t)h->recovered_total);
+            append_sample(h, SAMPLE_ERROR_RECOVERED);
+            h->torn_retry_total = 0;
+            if (h->sb.data_count + h->sample_bytes > ARRAY_SIZE(h->sb.data))
+                sensor_bulk_report(&h->sb, oid);
+        }
+        return;
+    }
+
     // The chips free-run on independent oscillators, so a chip may latch a
     // new conversion into its output register between the data-ready poll
     // and this read, or during the read itself. Bits clocked out across a
@@ -177,6 +279,34 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             torn_read = 1;
     }
 
+    // Capture and clear pending flag after all reads
+    irq_disable();
+    uint8_t flags = h->pending_flag;
+    h->pending_flag = 0;
+    irq_enable();
+
+    if (torn_read) {
+        // Every reference driver waits for DRDY and re-reads rather than
+        // consume a frame that raced a conversion (Prusa HX717
+        // src/common/hx717.cpp; Linux IIO drivers/iio/adc/hx711.c; upstream
+        // Klipper src/sensor_hx71x.c; Elegoo's bounded ready-poll). Do the
+        // same: emit nothing now and let the next DRDY drive a re-read.
+        // Bounded so a persistently mistimed chip degrades to the host's
+        // benign hold-last-value path instead of stalling the stream.
+        h->torn_retry_total++;
+        if (h->torn_retry_count < HX711S_MAX_TORN_RETRIES) {
+            h->torn_retry_count++;
+            return;
+        }
+        h->torn_retry_count = 0;
+        for (uint8_t i = 0; i < h->sensor_count; i++)
+            append_sample(h, (int32_t)SAMPLE_ERROR_TORN_READ);
+        if (h->sb.data_count + h->sample_bytes > ARRAY_SIZE(h->sb.data))
+            sensor_bulk_report(&h->sb, oid);
+        return;
+    }
+    h->torn_retry_count = 0;
+
     for (uint8_t i = 0; i < h->sensor_count; i++) {
         uint32_t raw = adc[i] >> gain_channel;
         if (raw & 0x800000)
@@ -186,24 +316,20 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             sample_error = SAMPLE_ERROR_DESYNC;
     }
 
-    // Capture and clear pending flag after all reads
-    irq_disable();
-    uint8_t flags = h->pending_flag;
-    h->pending_flag = 0;
-    irq_enable();
-
     if (flags & HX711S_OVERFLOW)
         sample_error = SAMPLE_ERROR_READ_TOO_LONG;
 
-    // Torn reads are a normal consequence of chip oscillator drift: discard
-    // just that sample, the next conversion is valid. They can also corrupt
-    // the extra-bit check, so they must take priority over a desync. A real
-    // desync corrupts the serial protocol state, making all further values
-    // unreliable until the chips are power cycled: latch it and keep
-    // reporting it so the host restarts the sensor.
-    if (torn_read)
-        sample_error = SAMPLE_ERROR_TORN_READ;
-    else if (sample_error)
+    // A desync corrupts the serial protocol state (the gain-selection pulse
+    // count no longer matches the chip), which only a power cycle clears
+    // (HX711F datasheet). Recover in-driver: the stream pauses for the
+    // ~115ms power-down/settle/discard sequence instead of faulting the
+    // host, which previously force-restarted the sensor and killed any
+    // active probe session.
+    if (sample_error == SAMPLE_ERROR_DESYNC) {
+        hx711s_start_recovery(h);
+        return;
+    }
+    if (sample_error)
         h->last_error = sample_error;
 
     if (h->last_error)
@@ -339,6 +465,12 @@ command_query_hx711s(uint32_t *args)
     h->last_error = 0;
     h->have_last_counts = 0;
     h->have_pending_counts = 0;
+    h->recovery_state = RECOVERY_NONE;
+    h->settle_remaining = 0;
+    h->torn_retry_count = 0;
+    h->torn_retry_total = 0;
+    h->recovered_total = 0;
+    h->not_ready_since = 0;
     h->rest_ticks = args[1];
     if (!h->rest_ticks) {
         for (uint8_t i = 0; i < h->sensor_count; i++)

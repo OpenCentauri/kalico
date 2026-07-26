@@ -16,6 +16,7 @@ UPDATE_INTERVAL = 0.10
 SAMPLE_ERROR_DESYNC = -0x80000000
 SAMPLE_ERROR_READ_TOO_LONG = 0x40000000
 SAMPLE_ERROR_TORN_READ = 0x20000000
+SAMPLE_ERROR_RECOVERED = 0x10000000
 ADC_FACTOR = 1.0 / (1 << 23)
 # A corrupt chip frame can pass framing yet sit hundreds of thousands of
 # counts from the truth. A single chip's reading moves by well under this
@@ -40,6 +41,8 @@ class HX711SBase(LoadCellSensor):
         self.consecutive_fails = 0
         self.torn_read_count = 0
         self.spike_count = 0
+        self.torn_retry_total = 0
+        self.recovered_count = 0
         # last valid per-channel counts, held across torn reads and glitches
         # to keep the sample stream gap-free (see _convert_samples)
         self._last_channel_counts = None
@@ -189,6 +192,20 @@ class HX711SBase(LoadCellSensor):
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
                 break  # errors latch in the MCU, the rest are duplicates
+            elif val == SAMPLE_ERROR_RECOVERED:
+                # The MCU power-cycled the chips in-driver (datasheet
+                # recovery) and discarded the settling conversions; the
+                # stream paused ~115ms instead of faulting. Marker frame:
+                # ch1 = torn-read retry tally, ch2 = recovery tally.
+                self.torn_retry_total += channel_counts[1]
+                self.recovered_count = channel_counts[2]
+                logging.warning(
+                    "%s: in-driver recovery at t=%.3f (recoveries=%d,"
+                    " torn retries=%d)",
+                    self.name, ptime, self.recovered_count,
+                    self.torn_retry_total,
+                )
+                continue  # marker, not a force sample
             elif self._is_glitch(channel_counts, ptime):
                 # corrupt frame that passed framing; hold the last good
                 # reading so the curve stays clean for tap analysis
