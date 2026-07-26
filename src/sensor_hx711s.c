@@ -45,6 +45,18 @@
 // SPS), so a larger single-sample jump is a glitch, not a load change.
 #define SPIKE_CHANNEL_THRESHOLD 100000
 
+// Move-start acceleration kicks (500 mm/s^2 Z moves) ring the bed frame and
+// appear as single-sample force impulses of ~200-250g (~20-30k counts on
+// the channel sum) that fully revert on the next sample; measured on the
+// CC1 test printer from recorded tap curves (2026-07-26, 40+ taps). Real
+// contact at 2mm/s rises by at most ~80g/sample sustained, so any larger
+// single-sample sum jump is held back for one sample and only forwarded to
+// the probe trigger if the next sample confirms it (a genuine step). A
+// one-sample impulse can otherwise fire a first-crossing trigger 1mm+
+// above the real contact point (phantom trigger -> flat tap window ->
+// TAP_CHRONOLOGY aborts).
+#define SPIKE_SUM_THRESHOLD 20000
+
 struct hx711s_adc {
     struct timer timer;
     uint32_t rest_ticks;
@@ -52,10 +64,14 @@ struct hx711s_adc {
     uint32_t not_ready_since;
     int32_t last_good_counts[MAX_SENSORS];
     int32_t pending_counts[MAX_SENSORS];
+    int32_t last_good_sum;
+    int32_t pending_sum;
     uint16_t torn_retry_total;
     uint16_t recovered_total;
     uint8_t have_last_counts;
     uint8_t have_pending_counts;
+    uint8_t have_last_sum;
+    uint8_t have_pending_sum;
     uint8_t pending_flag;
     uint8_t recovery_state;
     uint8_t settle_remaining;
@@ -230,6 +246,52 @@ append_sample(struct hx711s_adc *h, int32_t val)
     h->sb.data_count += BYTES_PER_SAMPLE;
 }
 
+// Forward a summed sample to the probe trigger unless it is a single-sample
+// impulse (see SPIKE_SUM_THRESHOLD): the first jump is held for one sample
+// and only released if the next sample confirms it. The raw per-channel
+// stream above is unaffected, so the host still sees the impulse for
+// diagnostics. Same hold-confirm pattern as the per-channel glitch filter.
+static void
+report_sum(struct hx711s_adc *h, int32_t sum)
+{
+    if (!h->have_last_sum) {
+        h->last_good_sum = sum;
+        h->have_last_sum = 1;
+        if (h->lce)
+            load_cell_probe_report_sample(h->lce, sum);
+        return;
+    }
+    int32_t delta = sum - h->last_good_sum;
+    if (delta > SPIKE_SUM_THRESHOLD || delta < -SPIKE_SUM_THRESHOLD) {
+        if (h->have_pending_sum) {
+            int32_t pdelta = sum - h->pending_sum;
+            if (pdelta <= SPIKE_SUM_THRESHOLD
+                && pdelta >= -SPIKE_SUM_THRESHOLD) {
+                // two consecutive samples agree on the new value: genuine
+                // sustained step, release the held sample and this one
+                if (h->lce)
+                    load_cell_probe_report_sample(h->lce, h->pending_sum);
+                h->last_good_sum = h->pending_sum;
+                h->have_pending_sum = 0;
+            } else {
+                // still jumping: track the latest suspect value
+                h->pending_sum = sum;
+                return;
+            }
+        } else {
+            h->pending_sum = sum;
+            h->have_pending_sum = 1;
+            return;
+        }
+    } else if (h->have_pending_sum) {
+        // the held sample reverted: it was an impulse, drop it
+        h->have_pending_sum = 0;
+    }
+    h->last_good_sum = sum;
+    if (h->lce)
+        load_cell_probe_report_sample(h->lce, sum);
+}
+
 static void
 hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
 {
@@ -356,8 +418,7 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
             for (uint8_t i = 0; i < h->sensor_count; i++)
                 h->last_good_counts[i] = counts_buf[i];
             h->have_last_counts = 1;
-            if (h->lce)
-                load_cell_probe_report_sample(h->lce, sum);
+            report_sum(h, sum);
         } else {
             for (uint8_t i = 0; i < h->sensor_count; i++) {
                 int32_t delta = counts_buf[i] - h->last_good_counts[i];
@@ -372,8 +433,7 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
                 h->have_pending_counts = 0;
                 for (uint8_t i = 0; i < h->sensor_count; i++)
                     h->last_good_counts[i] = counts_buf[i];
-                if (h->lce)
-                    load_cell_probe_report_sample(h->lce, sum);
+                report_sum(h, sum);
             } else if (h->have_pending_counts) {
                 uint8_t pending_match = 1;
                 for (uint8_t i = 0; i < h->sensor_count; i++) {
@@ -391,8 +451,7 @@ hx711s_read_adc(struct hx711s_adc *h, uint8_t oid)
                     h->have_pending_counts = 0;
                     for (uint8_t i = 0; i < h->sensor_count; i++)
                         h->last_good_counts[i] = counts_buf[i];
-                    if (h->lce)
-                        load_cell_probe_report_sample(h->lce, sum);
+                    report_sum(h, sum);
                 } else {
                     // Replace a stale pending glitch with the latest sample.
                     for (uint8_t i = 0; i < h->sensor_count; i++)
@@ -465,6 +524,8 @@ command_query_hx711s(uint32_t *args)
     h->last_error = 0;
     h->have_last_counts = 0;
     h->have_pending_counts = 0;
+    h->have_last_sum = 0;
+    h->have_pending_sum = 0;
     h->recovery_state = RECOVERY_NONE;
     h->settle_remaining = 0;
     h->torn_retry_count = 0;
