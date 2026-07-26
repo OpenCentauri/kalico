@@ -33,6 +33,7 @@ struct hx711s_chip {
     struct gpio_in dout; // pin used to receive data from the hx711s
     struct gpio_out sclk; // pin used to generate clock for the hx711s
     int32_t counts; // most recent reading, held until the chip is read again
+    uint32_t last_read_ticks; // liveness timestamp for the stuck watchdog
     uint8_t index;
     uint8_t flags;
     uint8_t bad_frame; // last read produced nothing usable, counts still holds
@@ -49,6 +50,7 @@ struct hx711s_adc {
     uint8_t have_counts;    // chips that have produced a reading
     uint32_t rest_ticks;
     uint32_t last_error;
+    uint32_t stuck_ticks;   // stuck watchdog: max age of any chip's reading
     uint32_t settle_ticks;  // post-wake settling window (rate-aware)
     uint8_t recovery_streak; // recoveries since the last good frame
     struct hx711s_chip chips[MAX_SENSORS];
@@ -153,9 +155,12 @@ hx711s_event(struct timer *timer)
     } else if (hx711s_is_data_ready(chip)) {
         // New sample pending
         chip->flags = HX_PENDING;
-        sched_wake_task(&wake_hx711s);
         rest_ticks *= 8;
     }
+    // Wake the task on every event, not just when data is pending, so the
+    // stuck watchdog is enforced even when no chip ever presents DRDY
+    // (all-stuck-high lines, single-chip configurations)
+    sched_wake_task(&wake_hx711s);
     chip->timer.waketime += rest_ticks;
     return SF_RESCHEDULE;
 }
@@ -248,6 +253,9 @@ hx711s_recover(struct hx711s_adc *hx711s)
     hx711s->have_counts = 0;
     if (hx711s->last_error != SAMPLE_ERROR_DESYNC)
         hx711s->last_error = SAMPLE_ERROR_RECOVERED;
+    // grace spans the full qualification window (4 discards at any rate)
+    for (uint8_t i = 0; i < hx711s->sensor_count; i++)
+        hx711s->chips[i].last_read_ticks = waketime + hx711s->settle_ticks;
 }
 
 // hx711s ADC query
@@ -255,6 +263,9 @@ static void
 hx711s_read_adc(struct hx711s_chip *chip)
 {
     struct hx711s_adc *hx711s = chip->adc;
+
+    // Every completed read is that chip's liveness signal for the watchdog
+    chip->last_read_ticks = timer_read_time();
 
     // Read from sensor, re-reading (bounded) if a conversion latched
     // during the transfer: a fresh conversion leaves DOUT low again right
@@ -354,6 +365,9 @@ command_config_hx711s(uint32_t *args)
     }
     hx711s->gain_channel = gain_channel;
     hx711s->torn_retries = 2; // default; host may override via set_tuning
+    // default ~2.5 periods at 80 SPS, matching the host's derived value;
+    // host always sends stuck_ms via set_tuning, so this is a fallback
+    hx711s->stuck_ticks = timer_from_us(36000);
     // default 4 conversions + margin at 80 SPS; host sends a rate-aware
     // value via set_tuning
     hx711s->settle_ticks = timer_from_us(60000);
@@ -373,10 +387,12 @@ command_hx711s_set_tuning(uint32_t *args)
     uint8_t oid = args[0];
     struct hx711s_adc *hx711s = oid_lookup(oid, command_config_hx711s);
     hx711s->torn_retries = args[1];
-    hx711s->settle_ticks = timer_from_us(args[2] * 1000);
+    hx711s->stuck_ticks = timer_from_us(args[2] * 1000);
+    hx711s->settle_ticks = timer_from_us(args[3] * 1000);
 }
 DECL_COMMAND(command_hx711s_set_tuning,
-             "hx711s_set_tuning oid=%c torn_retries=%c settle_ms=%u");
+             "hx711s_set_tuning oid=%c torn_retries=%c stuck_ms=%u"
+             " settle_ms=%u");
 
 // Assign the pins of one chip
 void
@@ -439,6 +455,7 @@ command_query_hx711s(uint32_t *args)
     uint32_t waketime = timer_read_time() + hx711s->settle_ticks;
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
         hx711s->chips[i].settle_remaining = 4;
+        hx711s->chips[i].last_read_ticks = waketime;
         hx711s->chips[i].timer.waketime = waketime;
         sched_add_timer(&hx711s->chips[i].timer);
     }
@@ -511,6 +528,24 @@ hx711s_capture_task(void)
         // requalify -- no events fire during the settle itself.)
         if (hx711s->last_error == SAMPLE_ERROR_RECOVERED && hx711s->lce)
             load_cell_probe_report_sample(hx711s->lce, hx711s_sum(hx711s));
+        // Stuck watchdog: a chip whose reading is older than stuck_ticks
+        // (~2.5 conversion periods) has a wedged DRDY. The primary chip
+        // stalls the stream outright; a wedged secondary silently feeds
+        // stale counts into the sum, which is worse. Recover either way.
+        // Ceiling: a chip that reads forever but never well keeps
+        // have_counts incomplete after a recovery and stalls emission --
+        // reads refresh liveness so the watchdog cannot see it; the
+        // host's bulk timeout handles that case.
+        if (hx711s->rest_ticks) {
+            uint32_t now = timer_read_time();
+            for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
+                if (timer_is_before(hx711s->chips[i].last_read_ticks
+                                    + hx711s->stuck_ticks, now)) {
+                    hx711s_recover(hx711s);
+                    break;
+                }
+            }
+        }
     }
 }
 DECL_TASK(hx711s_capture_task);

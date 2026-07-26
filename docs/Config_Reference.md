@@ -6098,6 +6098,11 @@ sclk_pins:
 #   Re-read attempts when a conversion latches during a frame transfer
 #   (torn frame) before the previous value is held for that round. The
 #   default is 2. It is rare to customize this value.
+#stuck_timeout_ms: 0
+#   Milliseconds any chip may go without producing a reading before the
+#   driver power-cycles and resumes (stuck DRDY watchdog). The default 0
+#   derives the timeout from sample_rate (~2.5 conversion periods). It is
+#   rare to customize this value.
 #settle_ms:
 #   Post-wake settling window in milliseconds; the first conversions
 #   after wake are discarded (datasheet: output valid from the 4th
