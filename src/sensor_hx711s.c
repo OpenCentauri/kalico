@@ -45,17 +45,18 @@
 // SPS), so a larger single-sample jump is a glitch, not a load change.
 #define SPIKE_CHANNEL_THRESHOLD 100000
 
-// Move-start acceleration kicks (500 mm/s^2 Z moves) ring the bed frame and
-// appear as single-sample force impulses of ~200-250g (~20-30k counts on
-// the channel sum) that fully revert on the next sample; measured on the
-// CC1 test printer from recorded tap curves (2026-07-26, 40+ taps). Real
-// contact at 2mm/s rises by at most ~80g/sample sustained, so any larger
-// single-sample sum jump is held back for one sample and only forwarded to
-// the probe trigger if the next sample confirms it (a genuine step). A
-// one-sample impulse can otherwise fire a first-crossing trigger 1mm+
-// above the real contact point (phantom trigger -> flat tap window ->
-// TAP_CHRONOLOGY aborts).
-#define SPIKE_SUM_THRESHOLD 20000
+// Move accel kicks and travel vibration produce single-sample force
+// impulses that fully revert on the next sample; captured on the CC1 test
+// printer from raw force streams and tap curves (2026-07-26): ~220g blips
+// at move starts and an isolated +87g blip 0.5s after travel settled, one
+// sample wide. Any such impulse that crosses trigger_force fires a phantom
+// first-crossing trigger ("probe triggered prior to movement" or a flat
+// tap window -> TAP_CHRONOLOGY). Real contact at 2mm/s rises by at most
+// ~80g/sample and is SUSTAINED. So any single-sample jump larger than the
+// trigger force is held for one sample and only forwarded if the next
+// sample confirms it (sign-aware: an up-jump confirms if the next sample
+// stays above pending - threshold, which steep real ramps satisfy).
+#define SPIKE_SUM_THRESHOLD 7000  // ~67g, just under trigger_force (75g)
 
 struct hx711s_adc {
     struct timer timer;
@@ -264,9 +265,13 @@ report_sum(struct hx711s_adc *h, int32_t sum)
     int32_t delta = sum - h->last_good_sum;
     if (delta > SPIKE_SUM_THRESHOLD || delta < -SPIKE_SUM_THRESHOLD) {
         if (h->have_pending_sum) {
-            int32_t pdelta = sum - h->pending_sum;
-            if (pdelta <= SPIKE_SUM_THRESHOLD
-                && pdelta >= -SPIKE_SUM_THRESHOLD) {
+            // sign-aware confirm: the step is genuine if the level held;
+            // a steep real ramp keeps rising past the pending value, a
+            // phantom impulse reverts below it
+            int32_t confirm = (delta > 0)
+                ? (sum >= h->pending_sum - SPIKE_SUM_THRESHOLD)
+                : (sum <= h->pending_sum + SPIKE_SUM_THRESHOLD);
+            if (confirm) {
                 // two consecutive samples agree on the new value: genuine
                 // sustained step, release the held sample and this one
                 if (h->lce)
