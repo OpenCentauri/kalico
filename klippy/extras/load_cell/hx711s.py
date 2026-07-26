@@ -74,6 +74,11 @@ class HX711SBase(LoadCellSensor):
         self.gain_channel = int(
             config.getchoice("gain", gain_options, default=default_gain)
         )
+        stuck_ms = config.getint("stuck_timeout_ms", 0, minval=0)
+        if not stuck_ms:
+            # ~2.5 conversion periods + margin at the configured rate
+            stuck_ms = 2500 // self.sps + 5
+        self.stuck_ms = stuck_ms
         # Post-wake settling window: 4 conversions + margin (datasheet:
         # output valid from the 4th conversion after power-up)
         self.settle_ms = config.getint(
@@ -111,7 +116,7 @@ class HX711SBase(LoadCellSensor):
         )
         mcu.add_config_cmd(
             f"hx711s_set_tuning oid={self.oid}"
-            f" settle_ms={self.settle_ms}"
+            f" stuck_ms={self.stuck_ms} settle_ms={self.settle_ms}"
         )
         mcu.register_config_callback(self._build_config)
 

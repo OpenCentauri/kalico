@@ -6094,6 +6094,11 @@ sclk_pins:
 #   Valid values are 80 or 10. The default is 80. This must match the hardware
 #   wiring of the RATE pin, which is shared by all chips. The sample rate
 #   cannot be changed in software.
+#stuck_timeout_ms: 0
+#   Milliseconds any chip may go without producing a reading before the
+#   driver power-cycles that chip and resumes (stuck DRDY watchdog). The
+#   default 0 derives the timeout from sample_rate (~2.5 conversion
+#   periods). It is rare to customize this value.
 #settle_ms:
 #   Post-wake settling window in milliseconds; the first conversions
 #   after wake are discarded (datasheet: output valid from the 4th
