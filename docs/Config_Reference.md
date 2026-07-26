@@ -6094,6 +6094,12 @@ sclk_pins:
 #   Valid values are 80 or 10. The default is 80. This must match the hardware
 #   wiring of the RATE pin, which is shared by all chips. The sample rate
 #   cannot be changed in software.
+#settle_ms:
+#   Post-wake settling window in milliseconds; the first conversions
+#   after wake are discarded (datasheet: output valid from the 4th
+#   conversion). The default derives from sample_rate (4 conversions +
+#   margin: ~60ms at 80 SPS, ~410ms at 10 SPS). It is rare to customize
+#   this value.
 ```
 
 #### HX717S

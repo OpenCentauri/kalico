@@ -36,6 +36,8 @@ struct hx711s_chip {
     uint8_t index;
     uint8_t flags;
     uint8_t bad_frame; // last read produced nothing usable, counts still holds
+    uint8_t settle_remaining; // post-wake conversions still to discard
+    uint8_t bad_streak;     // consecutive unusable frames
 };
 
 struct hx711s_adc {
@@ -44,8 +46,11 @@ struct hx711s_adc {
     uint8_t sample_bytes;   // bytes in one multi-channel sample
     uint8_t chip_mask;      // bit per configured chip
     uint8_t have_counts;    // chips that have produced a reading
+    uint8_t recovering_mask; // chips mid power-cycle requalification
     uint32_t rest_ticks;
     uint32_t last_error;
+    uint32_t settle_ticks;  // post-wake settling window (rate-aware)
+    uint8_t recovery_streak; // recoveries since the last good frame
     struct hx711s_chip chips[MAX_SENSORS];
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
@@ -59,6 +64,7 @@ enum {
 #define SAMPLE_ERROR_DESYNC 1L << 31
 #define SAMPLE_ERROR_READ_TOO_LONG 1L << 30
 #define SAMPLE_ERROR_BAD_FRAME 1L << 29
+#define SAMPLE_ERROR_RECOVERED 1L << 28
 
 static struct task_wake wake_hx711s;
 
@@ -184,7 +190,7 @@ add_sample(struct hx711s_adc *hx711s, uint8_t oid, uint8_t force_flush)
         uint32_t counts = chip->bad_frame ? SAMPLE_ERROR_BAD_FRAME
                                           : (uint32_t)chip->counts;
 
-        // forever send errors until reset
+        // mark the first sample emitted after an in-driver recovery
         if (hx711s->last_error != 0) {
             counts = hx711s->last_error;
         }
@@ -195,6 +201,64 @@ add_sample(struct hx711s_adc *hx711s, uint8_t oid, uint8_t force_flush)
     if (hx711s->sb.data_count + hx711s->sample_bytes
         > ARRAY_SIZE(hx711s->sb.data) || force_flush)
         sensor_bulk_report(&hx711s->sb, oid);
+}
+
+// Power-cycle one chip and resume: SCK high >60us powers the chip down
+// (HX711 datasheet, power-down control), which clears any protocol desync
+// or stalled conversion. The chip's poll re-arms at the normal cadence
+// after a 1ms power-up guard and its next 4 conversions are discarded
+// (datasheet: output valid from the 4th conversion), so the stream keeps
+// flowing from the healthy chips (and the faulted chip's held counts)
+// while it requalifies. The next emitted sample is marked
+// SAMPLE_ERROR_RECOVERED so the host can log it; no host-forced restart
+// is needed.
+static void
+hx711s_recover_chip(struct hx711s_chip *chip)
+{
+    struct hx711s_adc *hx711s = chip->adc;
+    if (hx711s->recovering_mask & ~(1 << chip->index)) {
+        // A second chip faulting while one is still requalifying is not
+        // two independent disturbances but a systemic fault (shared
+        // supply, ground or wiring): latch fatal and let the host
+        // restart rather than power-cycle chips against each other.
+        hx711s->last_error = SAMPLE_ERROR_DESYNC;
+        return;
+    }
+    if (++hx711s->recovery_streak > 3) {
+        // Three power cycles without a good frame means a dead chip or
+        // wiring fault: latch fatal and let the host restart rather
+        // than loop forever on stale data.
+        hx711s->last_error = SAMPLE_ERROR_DESYNC;
+        return;
+    }
+    gpio_out_write(chip->sclk, 1); // power down
+    uint32_t end = timer_read_time() + timer_from_us(100);
+    while (timer_is_before(timer_read_time(), end))
+        irq_poll();
+    // Re-arm at the normal cadence after a short power-up guard instead
+    // of pausing for the whole settle window: events (and therefore the
+    // held-sum probe feed) keep flowing, and the 4-conversion
+    // qualification discard absorbs any false-edge frames from a
+    // stabilising chip before they can reach the desync path. A
+    // settle-length pause would starve the probe watchdog (~4 periods)
+    // and abort an active homing move.
+    uint32_t waketime = timer_read_time() + timer_from_us(1000);
+    irq_disable();
+    gpio_out_write(chip->sclk, 0); // wake
+    chip->flags = 0;
+    chip->bad_frame = 0;
+    chip->bad_streak = 0; // fresh strikes: settle discards absorb wake noise
+    chip->settle_remaining = 4;
+    // timers are live in the sorted schedule list: waketime must be
+    // moved via del/add, not written in place
+    sched_del_timer(&chip->timer);
+    chip->timer.waketime = waketime;
+    sched_add_timer(&chip->timer);
+    irq_enable();
+    hx711s->have_counts &= ~(1 << chip->index);
+    hx711s->recovering_mask |= 1 << chip->index;
+    if (hx711s->last_error != SAMPLE_ERROR_DESYNC)
+        hx711s->last_error = SAMPLE_ERROR_RECOVERED;
 }
 
 // hx711s ADC query
@@ -217,6 +281,8 @@ hx711s_read_adc(struct hx711s_chip *chip)
         chip->flags = 0;
         irq_enable();
         chip->bad_frame = 1;
+        if (++chip->bad_streak > 2)
+            hx711s_recover_chip(chip);
         return;
     }
 
@@ -225,6 +291,16 @@ hx711s_read_adc(struct hx711s_chip *chip)
     uint8_t flags = chip->flags;
     chip->flags = 0;
     irq_enable();
+
+    // Qualification: after a wake the first conversions are settling
+    // (datasheet: output valid from the 4th conversion) and the very
+    // first read programs the requested gain/channel for the NEXT
+    // conversion, so its data is the reset-default A-128 regardless of
+    // the configured gain. Consume and discard.
+    if (chip->settle_remaining) {
+        chip->settle_remaining--;
+        return;
+    }
 
     // Extract report from raw data
     uint32_t counts = adc >> gain_channel;
@@ -235,7 +311,7 @@ hx711s_read_adc(struct hx711s_chip *chip)
     uint_fast8_t extras_mask = (1 << gain_channel) - 1;
     if ((adc & extras_mask) != extras_mask) {
         // Transfer did not complete correctly
-        hx711s->last_error = SAMPLE_ERROR_DESYNC;
+        hx711s_recover_chip(chip);
     } else if (counts == 0xFFFFFFFF) {
         // DOUT stayed high for the whole frame, so the chip was not
         // presenting data at all: it reset, browned out or lost its ground.
@@ -245,14 +321,23 @@ hx711s_read_adc(struct hx711s_chip *chip)
         // trigger. A stuck low line instead reads as zero and is caught as
         // a desync. Hold this chip's previous value rather than latch an
         // error, so a single disturbed frame does not stop the sensor.
+        // More than 2 in a row is a fault, not a disturbance: recover.
         chip->bad_frame = 1;
+        if (++chip->bad_streak > 2)
+            hx711s_recover_chip(chip);
     } else if (flags & HX_OVERFLOW) {
         // Transfer took too long
-        hx711s->last_error = SAMPLE_ERROR_READ_TOO_LONG;
+        hx711s_recover_chip(chip);
     } else {
         chip->bad_frame = 0;
+        chip->bad_streak = 0;
         chip->counts = (int32_t)counts;
         hx711s->have_counts |= 1 << chip->index;
+        hx711s->recovering_mask &= ~(1 << chip->index);
+        // a recovery only counts as survived once EVERY chip has
+        // requalified; one healthy sibling must not mask a dead one
+        if (hx711s->have_counts == hx711s->chip_mask)
+            hx711s->recovery_streak = 0;
     }
 }
 
@@ -274,6 +359,9 @@ command_config_hx711s(uint32_t *args)
         shutdown("HX711S gain/channel out of range 1-4");
     }
     hx711s->gain_channel = gain_channel;
+    // default 4 conversions + margin at 80 SPS; host sends a rate-aware
+    // value via set_tuning
+    hx711s->settle_ticks = timer_from_us(60000);
     for (uint8_t i = 0; i < sensor_count; i++) {
         struct hx711s_chip *chip = &hx711s->chips[i];
         chip->timer.func = hx711s_event;
@@ -283,6 +371,16 @@ command_config_hx711s(uint32_t *args)
 }
 DECL_COMMAND(command_config_hx711s, "config_hx711s oid=%c sensor_count=%c"
              " gain_channel=%c");
+
+void
+command_hx711s_set_tuning(uint32_t *args)
+{
+    uint8_t oid = args[0];
+    struct hx711s_adc *hx711s = oid_lookup(oid, command_config_hx711s);
+    hx711s->settle_ticks = timer_from_us(args[1] * 1000);
+}
+DECL_COMMAND(command_hx711s_set_tuning,
+             "hx711s_set_tuning oid=%c settle_ms=%u");
 
 // Assign the pins of one chip
 void
@@ -324,6 +422,8 @@ command_query_hx711s(uint32_t *args)
     }
     hx711s->last_error = 0;
     hx711s->have_counts = 0;
+    hx711s->recovering_mask = 0;
+    hx711s->recovery_streak = 0;
     hx711s->rest_ticks = args[1];
     if (!hx711s->rest_ticks) {
         // End measurements
@@ -336,12 +436,14 @@ command_query_hx711s(uint32_t *args)
         gpio_out_write(hx711s->chips[i].sclk, 0); // wake chip from power down
     sensor_bulk_reset(&hx711s->sb);
     // The chips take up to 400ms (typically 10-20ms) to settle once their
-    // power down pin is released. Delay the first poll so the first data
-    // ready edge does not come from a still stabilising chip, which clocks
-    // out a partial frame and reads as a desync.
+    // power down pin is released; the first 4 conversions are discarded
+    // (datasheet: output valid from the 4th conversion). Delay the first
+    // poll by the rate-aware settle window so the first data ready edge
+    // does not come from a still stabilising chip.
     irq_disable();
-    uint32_t waketime = timer_read_time() + timer_from_us(50000);
+    uint32_t waketime = timer_read_time() + hx711s->settle_ticks;
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
+        hx711s->chips[i].settle_remaining = 4;
         hx711s->chips[i].timer.waketime = waketime;
         sched_add_timer(&hx711s->chips[i].timer);
     }
@@ -388,8 +490,12 @@ hx711s_capture_task(void)
         // spaced, which is what the host clock tracking assumes, while the
         // remaining channels are held at their most recent reading. Wait for
         // every chip to report once so no sample carries an unset channel.
+        // A chip in recovery keeps contributing its held counts
+        // (recovering_mask), so the sample stream and the probe feed keep
+        // flowing while it requalifies.
         if (read_primary && (hx711s->last_error
-                             || hx711s->have_counts == hx711s->chip_mask)) {
+                             || (hx711s->have_counts | hx711s->recovering_mask)
+                                == hx711s->chip_mask)) {
             // probe is optional, report if enabled. Reporting here rather
             // than on each chip read keeps the probe's filter running at the
             // rate its coefficients were designed for. A bad frame is still
@@ -403,6 +509,9 @@ hx711s_capture_task(void)
             }
             // Add measurement to buffer
             add_sample(hx711s, oid, false);
+            // recovery marker is one-shot; a latched fatal error persists
+            if (hx711s->last_error == SAMPLE_ERROR_RECOVERED)
+                hx711s->last_error = 0;
         }
     }
 }
