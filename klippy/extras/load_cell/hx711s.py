@@ -79,6 +79,11 @@ class HX711SBase(LoadCellSensor):
             # ~2.5 conversion periods + margin at the configured rate
             stuck_ms = 2500 // self.sps + 5
         self.stuck_ms = stuck_ms
+        # Hold single-sample force jumps larger than this from the probe
+        # trigger feed. Must stay below trigger_force converted to counts
+        # (trigger_force x counts_per_gram) or phantom impulses leak.
+        self.spike_sum_threshold = config.getint(
+            "impulse_threshold_counts", 5775, minval=1)
         # Post-wake settling window: 4 conversions + margin (datasheet:
         # output valid from the 4th conversion after power-up)
         self.settle_ms = config.getint(
@@ -116,7 +121,9 @@ class HX711SBase(LoadCellSensor):
         )
         mcu.add_config_cmd(
             f"hx711s_set_tuning oid={self.oid}"
-            f" stuck_ms={self.stuck_ms} settle_ms={self.settle_ms}"
+            f" stuck_ms={self.stuck_ms}"
+            f" spike_sum_threshold={self.spike_sum_threshold}"
+            f" settle_ms={self.settle_ms}"
         )
         mcu.register_config_callback(self._build_config)
 

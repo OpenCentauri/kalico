@@ -53,6 +53,12 @@ struct hx711s_adc {
     uint32_t stuck_ticks;   // stuck watchdog: max age of any chip's reading
     uint32_t settle_ticks;  // post-wake settling window (rate-aware)
     uint8_t recovery_streak; // recoveries since the last good frame
+    int32_t spike_sum_threshold; // impulse hold: hold jumps larger than this
+    int32_t last_good_sum;  // impulse hold: last sum forwarded to probe
+    int32_t pending_sum;    // held sample awaiting confirmation
+    uint8_t have_last_sum;
+    uint8_t have_pending_sum;
+
     struct hx711s_chip chips[MAX_SENSORS];
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
@@ -189,6 +195,71 @@ hx711s_sum(struct hx711s_adc *hx711s)
     for (uint8_t i = 0; i < hx711s->sensor_count; i++)
         sum += hx711s->chips[i].counts;
     return sum;
+}
+
+// Move accel kicks and travel vibration produce single-sample force
+// impulses that fully revert on the next sample; captured on the CC1 test
+// printer from raw force streams and tap curves (2026-07-26): ~220g blips
+// at move starts and an isolated +87g blip 0.5s after travel settled, one
+// sample wide, plus 3 more 76-78g blips in a 5-run capture on this driver.
+// Any such impulse that crosses trigger_force fires a phantom
+// first-crossing trigger ("probe triggered prior to movement" or a flat
+// tap window -> TAP_CHRONOLOGY). Real contact at 2mm/s rises by at most
+// ~80g/sample and is SUSTAINED. So any single-sample jump larger than the
+// trigger force is held for one sample and only forwarded if the next
+// sample confirms it (sign-aware: an up-jump confirms if the next sample
+// stays above pending - threshold, which steep real ramps satisfy).
+// Threshold = trigger_force (75g) minus the +/-20g baseline noise seen
+// between moves: offline replay of the 197k-sample hx711s-new2 capture
+// showed a 67g threshold leaks a 75.9g impulse rising from an elevated
+// (+11g) baseline; 55g removes all 3 captured impulses, loses zero real
+// taps, and costs a uniform 1-sample trigger latency.
+#define DEFAULT_SPIKE_SUM_THRESHOLD 5775  // ~55g at 105 counts/g
+
+// Forward a summed sample to the probe trigger unless it is a
+// single-sample impulse (see SPIKE_SUM_THRESHOLD). The bulk stream is
+// unaffected: impulses still reach the host for diagnostics.
+static void
+report_sum(struct hx711s_adc *hx711s, int32_t sum)
+{
+    if (!hx711s->have_last_sum) {
+        hx711s->last_good_sum = sum;
+        hx711s->have_last_sum = 1;
+        load_cell_probe_report_sample(hx711s->lce, sum);
+        return;
+    }
+    int32_t spike_sum_threshold = hx711s->spike_sum_threshold;
+    int32_t delta = sum - hx711s->last_good_sum;
+    if (delta > spike_sum_threshold || delta < -spike_sum_threshold) {
+        if (hx711s->have_pending_sum) {
+            // sign-aware confirm against the PENDING jump's direction:
+            // the step is genuine if the level held; a steep real ramp
+            // keeps rising past the pending value, a phantom impulse
+            // reverts below it, and a sample that flips to the opposite
+            // side of the baseline cannot confirm the held one
+            int32_t confirm =
+                (hx711s->pending_sum > hx711s->last_good_sum)
+                ? (sum >= hx711s->pending_sum - spike_sum_threshold)
+                : (sum <= hx711s->pending_sum + spike_sum_threshold);
+            if (confirm) {
+                load_cell_probe_report_sample(hx711s->lce,
+                                              hx711s->pending_sum);
+                hx711s->last_good_sum = hx711s->pending_sum;
+                hx711s->have_pending_sum = 0;
+            } else {
+                hx711s->pending_sum = sum; // still jumping: track latest
+                return;
+            }
+        } else {
+            hx711s->pending_sum = sum;
+            hx711s->have_pending_sum = 1;
+            return;
+        }
+    } else if (hx711s->have_pending_sum) {
+        hx711s->have_pending_sum = 0; // impulse reverted: drop held sample
+    }
+    hx711s->last_good_sum = sum;
+    load_cell_probe_report_sample(hx711s->lce, sum);
 }
 
 // Emit one sample carrying the latest reading from every chip
@@ -382,6 +453,7 @@ command_config_hx711s(uint32_t *args)
     // default 4 conversions + margin at 80 SPS; host sends a rate-aware
     // value via set_tuning
     hx711s->settle_ticks = timer_from_us(60000);
+    hx711s->spike_sum_threshold = DEFAULT_SPIKE_SUM_THRESHOLD;
     for (uint8_t i = 0; i < sensor_count; i++) {
         struct hx711s_chip *chip = &hx711s->chips[i];
         chip->timer.func = hx711s_event;
@@ -398,10 +470,12 @@ command_hx711s_set_tuning(uint32_t *args)
     uint8_t oid = args[0];
     struct hx711s_adc *hx711s = oid_lookup(oid, command_config_hx711s);
     hx711s->stuck_ticks = timer_from_us(args[1] * 1000);
-    hx711s->settle_ticks = timer_from_us(args[2] * 1000);
+    hx711s->spike_sum_threshold = args[2];
+    hx711s->settle_ticks = timer_from_us(args[3] * 1000);
 }
 DECL_COMMAND(command_hx711s_set_tuning,
-             "hx711s_set_tuning oid=%c stuck_ms=%u settle_ms=%u");
+             "hx711s_set_tuning oid=%c stuck_ms=%u"
+             " spike_sum_threshold=%i settle_ms=%u");
 
 // Assign the pins of one chip
 void
@@ -445,6 +519,8 @@ command_query_hx711s(uint32_t *args)
     hx711s->have_counts = 0;
     hx711s->recovering_mask = 0;
     hx711s->recovery_streak = 0;
+    hx711s->have_last_sum = 0;
+    hx711s->have_pending_sum = 0;
     hx711s->rest_ticks = args[1];
     if (!hx711s->rest_ticks) {
         // End measurements
@@ -526,8 +602,7 @@ hx711s_capture_task(void)
             // reports would starve the probe watchdog and abort the homing
             // move instead.
             if (hx711s->last_error == 0 && hx711s->lce) {
-                load_cell_probe_report_sample(hx711s->lce,
-                                              hx711s_sum(hx711s));
+                report_sum(hx711s, hx711s_sum(hx711s));
             }
             // Add measurement to buffer
             add_sample(hx711s, oid, false);

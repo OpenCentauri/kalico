@@ -6099,6 +6099,14 @@ sclk_pins:
 #   driver power-cycles that chip and resumes (stuck DRDY watchdog). The
 #   default 0 derives the timeout from sample_rate (~2.5 conversion
 #   periods). It is rare to customize this value.
+#impulse_threshold_counts: 5775
+#   Single-sample force jumps (on the summed counts) larger than this are
+#   held from the probe trigger for one sample and dropped unless the next
+#   sample confirms them -- rejects accel-kick impulses that would fire
+#   phantom triggers. MUST stay below trigger_force converted to counts
+#   (trigger_force x counts_per_gram; e.g. 75g x 105 = 7875) or phantom
+#   impulses leak past it. ~55g at the stock 105 counts/gram. It is rare
+#   to customize this value.
 #settle_ms:
 #   Post-wake settling window in milliseconds; the first conversions
 #   after wake are discarded (datasheet: output valid from the 4th
