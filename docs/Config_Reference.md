@@ -6098,6 +6098,12 @@ sclk_pins:
 #   Re-read attempts when a conversion latches during a frame transfer
 #   (torn frame) before the previous value is held for that round. The
 #   default is 2. It is rare to customize this value.
+#settle_ms:
+#   Post-wake settling window in milliseconds; the first conversions
+#   after wake are discarded (datasheet: output valid from the 4th
+#   conversion). The default derives from sample_rate (4 conversions +
+#   margin: ~60ms at 80 SPS, ~410ms at 10 SPS). It is rare to customize
+#   this value.
 ```
 
 #### HX717S

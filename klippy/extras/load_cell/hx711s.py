@@ -18,6 +18,7 @@ UPDATE_INTERVAL = 0.10
 SAMPLE_ERROR_DESYNC = -0x80000000
 SAMPLE_ERROR_LONG_READ = 0x40000000
 SAMPLE_ERROR_BAD_FRAME = 0x20000000
+SAMPLE_ERROR_RECOVERED = 0x10000000
 
 
 # Implementation of multiple HX711 and HX717 chips as one load cell
@@ -34,6 +35,7 @@ class HX711SBase(LoadCellSensor):
         self.printer = printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
+        self.recovered_count = 0
         self.consecutive_fails = 0
         self.sensor_type = sensor_type
         self.bad_frame_count = 0
@@ -74,6 +76,10 @@ class HX711SBase(LoadCellSensor):
         )
         self.torn_retries = config.getint("torn_retries", 2,
                                           minval=0, maxval=8)
+        # Post-wake settling window: 4 conversions + margin (datasheet:
+        # output valid from the 4th conversion after power-up)
+        self.settle_ms = config.getint(
+            "settle_ms", 4000 // self.sps + 10, minval=1)
         self.oid = mcu.create_oid()
         ## Bulk Sensor Setup
         # Clock tracking
@@ -107,7 +113,7 @@ class HX711SBase(LoadCellSensor):
         )
         mcu.add_config_cmd(
             f"hx711s_set_tuning oid={self.oid}"
-            f" torn_retries={self.torn_retries}"
+            f" torn_retries={self.torn_retries} settle_ms={self.settle_ms}"
         )
         mcu.register_config_callback(self._build_config)
 
@@ -161,6 +167,12 @@ class HX711SBase(LoadCellSensor):
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
                 break  # errors latch in the MCU, the rest are duplicates
+            elif val == SAMPLE_ERROR_RECOVERED:
+                self.recovered_count += 1
+                logging.warning(
+                    "%s: in-driver recovery (power cycle) at t=%.3f",
+                    self.name, ptime)
+                continue  # one-shot marker; later frames are valid data
             # A latched error fills every channel, but a bad frame marks only
             # the chip that produced it, so every channel has to be checked
             bad = [
