@@ -17,7 +17,6 @@ from .interfaces import BulkAdcData, BulkAdcDataCallback, LoadCellSensor
 UPDATE_INTERVAL = 0.10
 SAMPLE_ERROR_DESYNC = -0x80000000
 SAMPLE_ERROR_LONG_READ = 0x40000000
-SAMPLE_ERROR_BAD_FRAME = 0x20000000
 
 
 # Implementation of multiple HX711 and HX717 chips as one load cell
@@ -36,8 +35,6 @@ class HX711SBase(LoadCellSensor):
         self.last_error_count = 0
         self.consecutive_fails = 0
         self.sensor_type = sensor_type
-        self.bad_frame_count = 0
-        self._bad_frame_channels = set()
         # Chip options
         ppins = printer.lookup_object("pins")
         sdo_pin_names = [p.strip() for p in config.get("sdo_pins").split(",")]
@@ -155,17 +152,6 @@ class HX711SBase(LoadCellSensor):
                 self.last_error_count += 1
                 logging.error("%s: READ_TOO_LONG at t=%.3f", self.name, ptime)
                 break  # errors latch in the MCU, the rest are duplicates
-            # A latched error fills every channel, but a bad frame marks only
-            # the chip that produced it, so every channel has to be checked
-            bad = [
-                i
-                for i, c in enumerate(channel_counts)
-                if c == SAMPLE_ERROR_BAD_FRAME
-            ]
-            if bad:
-                self.bad_frame_count += 1
-                self._bad_frame_channels.update(bad)
-                continue
             converted = [round(ptime, 6)]
             for ch in channel_counts:
                 converted.append(ch)
@@ -178,7 +164,6 @@ class HX711SBase(LoadCellSensor):
     def _start_measurements(self):
         self.consecutive_fails = 0
         self.last_error_count = 0
-        self._bad_frame_channels.clear()
         # Start bulk reading
         rest_ticks = self.mcu.seconds_to_clock(
             1.0 / (10.0 * self.get_samples_per_second())
@@ -204,20 +189,10 @@ class HX711SBase(LoadCellSensor):
     def _process_batch(self, eventtime) -> BulkAdcData:
         prev_overflows = self.ffreader.get_last_overflows()
         prev_error_count = self.last_error_count
-        prev_bad_frames = self.bad_frame_count
         samples = self.ffreader.pull_samples()
         self._convert_samples(samples)
         overflows = self.ffreader.get_last_overflows() - prev_overflows
         errors = self.last_error_count - prev_error_count
-        # Report dropped samples once per batch rather than once each, so a
-        # chip failing continuously cannot flood the log
-        bad_frames = self.bad_frame_count - prev_bad_frames
-        if bad_frames:
-            logging.warning(
-                "%s: dropped %d bad frame(s) on channel(s) %s",
-                self.name, bad_frames, sorted(self._bad_frame_channels),
-            )
-            self._bad_frame_channels.clear()
         if errors > 0:
             logging.error("%s: Forced sensor restart due to error", self.name)
             self._finish_measurements()
