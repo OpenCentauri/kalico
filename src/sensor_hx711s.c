@@ -36,6 +36,7 @@ struct hx711s_chip {
     uint8_t index;
     uint8_t flags;
     uint8_t bad_frame; // last read produced nothing usable, counts still holds
+    uint8_t settle_remaining; // conversions still to discard after a wake
 };
 
 struct hx711s_adc {
@@ -56,6 +57,7 @@ enum {
 };
 
 #define BYTES_PER_SAMPLE 4
+#define SETTLE_CONVERSIONS 4
 #define SAMPLE_ERROR_DESYNC 1L << 31
 #define SAMPLE_ERROR_READ_TOO_LONG 1L << 30
 #define SAMPLE_ERROR_BAD_FRAME 1L << 29
@@ -213,6 +215,12 @@ hx711s_read_adc(struct hx711s_chip *chip)
     chip->flags = 0;
     irq_enable();
 
+    // Discard the first 4 conversions after a wake as it hasn't settled yet
+    if (chip->settle_remaining) {
+        chip->settle_remaining--;
+        return;
+    }
+
     // Extract report from raw data
     uint32_t counts = adc >> gain_channel;
     if (counts & 0x800000)
@@ -322,13 +330,10 @@ command_query_hx711s(uint32_t *args)
     for (uint8_t i = 0; i < hx711s->sensor_count; i++)
         gpio_out_write(hx711s->chips[i].sclk, 0); // wake chip from power down
     sensor_bulk_reset(&hx711s->sb);
-    // The chips take up to 400ms (typically 10-20ms) to settle once their
-    // power down pin is released. Delay the first poll so the first data
-    // ready edge does not come from a still stabilising chip, which clocks
-    // out a partial frame and reads as a desync.
     irq_disable();
-    uint32_t waketime = timer_read_time() + timer_from_us(50000);
+    uint32_t waketime = timer_read_time() + hx711s->rest_ticks;
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
+        hx711s->chips[i].settle_remaining = SETTLE_CONVERSIONS;
         hx711s->chips[i].timer.waketime = waketime;
         sched_add_timer(&hx711s->chips[i].timer);
     }
