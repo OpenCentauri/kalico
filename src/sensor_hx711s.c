@@ -36,7 +36,6 @@ struct hx711s_chip {
     uint32_t counts_ticks; // when counts was last refreshed
     uint8_t index;
     uint8_t flags;
-    uint8_t bad_frame; // last read produced nothing usable, counts still holds
     uint8_t settle_remaining; // conversions still to discard after a wake
 };
 
@@ -62,7 +61,6 @@ enum {
 #define STALE_CONVERSIONS 3
 #define SAMPLE_ERROR_DESYNC 1L << 31
 #define SAMPLE_ERROR_READ_TOO_LONG 1L << 30
-#define SAMPLE_ERROR_BAD_FRAME 1L << 29
 
 static struct task_wake wake_hx711s;
 
@@ -174,8 +172,7 @@ add_sample(struct hx711s_adc *hx711s, uint8_t oid, uint8_t force_flush)
 {
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
         struct hx711s_chip *chip = &hx711s->chips[i];
-        uint32_t counts = chip->bad_frame ? SAMPLE_ERROR_BAD_FRAME
-                                          : (uint32_t)chip->counts;
+        uint32_t counts = (uint32_t)chip->counts;
 
         // forever send errors until reset
         if (hx711s->last_error != 0) {
@@ -227,21 +224,10 @@ hx711s_read_adc(struct hx711s_chip *chip)
     if ((adc & extras_mask) != extras_mask) {
         // Transfer did not complete correctly
         hx711s->last_error = SAMPLE_ERROR_DESYNC;
-    } else if (counts == 0xFFFFFFFF) {
-        // DOUT stayed high for the whole frame, so the chip was not
-        // presenting data at all: it reset, browned out or lost its ground.
-        // This frame cannot be caught by the check above because the gain
-        // bits are set too, and it sign extends to -1 counts, which is near
-        // enough to a tared reading to pass a range check and fire a false
-        // trigger. A stuck low line instead reads as zero and is caught as
-        // a desync. Hold this chip's previous value rather than latch an
-        // error, so a single disturbed frame does not stop the sensor.
-        chip->bad_frame = 1;
     } else if (flags & HX_OVERFLOW) {
         // Transfer took too long
         hx711s->last_error = SAMPLE_ERROR_READ_TOO_LONG;
     } else {
-        chip->bad_frame = 0;
         chip->counts = (int32_t)counts;
         chip->counts_ticks = timer_read_time();
         hx711s->have_counts |= 1 << chip->index;
@@ -312,7 +298,6 @@ command_query_hx711s(uint32_t *args)
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
         sched_del_timer(&hx711s->chips[i].timer);
         hx711s->chips[i].flags = 0;
-        hx711s->chips[i].bad_frame = 0;
     }
     hx711s->last_error = 0;
     hx711s->have_counts = 0;
