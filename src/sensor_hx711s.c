@@ -158,16 +158,6 @@ hx711s_event(struct timer *timer)
     return SF_RESCHEDULE;
 }
 
-static void
-add_counts(struct hx711s_adc *hx711s, uint32_t counts)
-{
-    hx711s->sb.data[hx711s->sb.data_count] = counts;
-    hx711s->sb.data[hx711s->sb.data_count + 1] = counts >> 8;
-    hx711s->sb.data[hx711s->sb.data_count + 2] = counts >> 16;
-    hx711s->sb.data[hx711s->sb.data_count + 3] = counts >> 24;
-    hx711s->sb.data_count += BYTES_PER_SAMPLE;
-}
-
 // The load cell is the sum of every chip, the value the probe triggers on
 static int32_t
 hx711s_sum(struct hx711s_adc *hx711s)
@@ -182,7 +172,6 @@ hx711s_sum(struct hx711s_adc *hx711s)
 static void
 add_sample(struct hx711s_adc *hx711s, uint8_t oid, uint8_t force_flush)
 {
-    // Add measurement to buffer
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
         struct hx711s_chip *chip = &hx711s->chips[i];
         uint32_t counts = chip->bad_frame ? SAMPLE_ERROR_BAD_FRAME
@@ -192,8 +181,13 @@ add_sample(struct hx711s_adc *hx711s, uint8_t oid, uint8_t force_flush)
         if (hx711s->last_error != 0) {
             counts = hx711s->last_error;
         }
-
-        add_counts(hx711s, counts);
+        
+        // Add measurement to buffer
+        hx711s->sb.data[hx711s->sb.data_count] = counts;
+        hx711s->sb.data[hx711s->sb.data_count + 1] = counts >> 8;
+        hx711s->sb.data[hx711s->sb.data_count + 2] = counts >> 16;
+        hx711s->sb.data[hx711s->sb.data_count + 3] = counts >> 24;
+        hx711s->sb.data_count += BYTES_PER_SAMPLE;
     }
 
     if (hx711s->sb.data_count + hx711s->sample_bytes
