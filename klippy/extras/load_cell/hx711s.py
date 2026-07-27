@@ -37,29 +37,29 @@ class HX711SBase(LoadCellSensor):
         self.sensor_type = sensor_type
         # Chip options
         ppins = printer.lookup_object("pins")
-        sdo_pin_names = [p.strip() for p in config.get("sdo_pins").split(",")]
+        dout_pin_names = [p.strip() for p in config.get("dout_pins").split(",")]
         sclk_pin_names = [p.strip() for p in config.get("sclk_pins").split(",")]
-        if len(sdo_pin_names) != len(sclk_pin_names):
+        if len(dout_pin_names) != len(sclk_pin_names):
             raise config.error(
-                f"{sensor_type}: sdo_pins and sclk_pins must have the same"
+                f"{sensor_type}: dout_pins and sclk_pins must have the same"
                 " number of entries"
             )
-        self.sensor_count = len(sdo_pin_names)
+        self.sensor_count = len(dout_pin_names)
         if self.sensor_count < 1 or self.sensor_count > 4:
             raise config.error(
                 f"{sensor_type}: must specify 1 to 4 sensor pin pairs"
             )
         # Resolve all pins and validate they share one MCU
-        sdo_ppins = [ppins.lookup_pin(p) for p in sdo_pin_names]
+        dout_ppins = [ppins.lookup_pin(p) for p in dout_pin_names]
         sclk_ppins = [ppins.lookup_pin(p) for p in sclk_pin_names]
-        mcu: MCU = sdo_ppins[0]["chip"]
+        mcu: MCU = dout_ppins[0]["chip"]
         self.mcu: MCU = mcu
-        for ppin in sdo_ppins[1:] + sclk_ppins:
+        for ppin in dout_ppins[1:] + sclk_ppins:
             if ppin["chip"] is not mcu:
                 raise config.error(
                     f"{sensor_type}: all pins must be on the same MCU"
                 )
-        self.sdo_pins = [p["pin"] for p in sdo_ppins]
+        self.dout_pins = [p["pin"] for p in dout_ppins]
         self.sclk_pins = [p["pin"] for p in sclk_ppins]
         # Samples per second choices
         self.sps = config.getchoice(
@@ -92,10 +92,10 @@ class HX711SBase(LoadCellSensor):
             f" sensor_count={self.sensor_count}"
             f" gain_channel={self.gain_channel}"
         )
-        for i, (sdo, sclk) in enumerate(zip(self.sdo_pins, self.sclk_pins)):
+        for i, (dout, sclk) in enumerate(zip(self.dout_pins, self.sclk_pins)):
             mcu.add_config_cmd(
                 f"add_hx711s oid={self.oid} index={i}"
-                f" sdo_pin={sdo} sclk_pin={sclk}"
+                f" dout_pin={dout} sclk_pin={sclk}"
             )
         mcu.add_config_cmd(
             f"query_hx711s oid={self.oid} rest_ticks=0", on_restart=True
