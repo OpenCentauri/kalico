@@ -278,7 +278,7 @@ command_add_hx711s(uint32_t *args)
     gpio_out_write(chip->sclk, 1); // put chip in power down state
 }
 DECL_COMMAND(command_add_hx711s, "add_hx711s oid=%c index=%c"
-             " sdo_pin=%u sclk_pin=%u");
+             " dout_pin=%u sclk_pin=%u");
 
 void
 hx711s_attach_load_cell_probe(uint32_t *args) {
