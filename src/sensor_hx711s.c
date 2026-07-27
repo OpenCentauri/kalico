@@ -33,6 +33,7 @@ struct hx711s_chip {
     struct gpio_in dout; // pin used to receive data from the hx711s
     struct gpio_out sclk; // pin used to generate clock for the hx711s
     int32_t counts; // most recent reading, held until the chip is read again
+    uint32_t counts_ticks; // when counts was last refreshed
     uint8_t index;
     uint8_t flags;
     uint8_t bad_frame; // last read produced nothing usable, counts still holds
@@ -58,6 +59,7 @@ enum {
 
 #define BYTES_PER_SAMPLE 4
 #define SETTLE_CONVERSIONS 4
+#define STALE_CONVERSIONS 3
 #define SAMPLE_ERROR_DESYNC 1L << 31
 #define SAMPLE_ERROR_READ_TOO_LONG 1L << 30
 #define SAMPLE_ERROR_BAD_FRAME 1L << 29
@@ -247,6 +249,7 @@ hx711s_read_adc(struct hx711s_chip *chip)
     } else {
         chip->bad_frame = 0;
         chip->counts = (int32_t)counts;
+        chip->counts_ticks = timer_read_time();
         hx711s->have_counts |= 1 << chip->index;
     }
 }
@@ -334,6 +337,7 @@ command_query_hx711s(uint32_t *args)
     uint32_t waketime = timer_read_time() + hx711s->rest_ticks;
     for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
         hx711s->chips[i].settle_remaining = SETTLE_CONVERSIONS;
+        hx711s->chips[i].counts_ticks = waketime;
         hx711s->chips[i].timer.waketime = waketime;
         sched_add_timer(&hx711s->chips[i].timer);
     }
@@ -375,6 +379,16 @@ hx711s_capture_task(void)
             hx711s_read_adc(&hx711s->chips[i]);
             if (i == 0)
                 read_primary = 1;
+        }
+        // Drop a chip that has stopped producing readings. Its held counts
+        // are stale and a sum missing a cell reads low, which would trigger
+        // the probe late or not at all. A poll is a tenth of a conversion.
+        uint32_t stale_ticks = hx711s->rest_ticks * 10 * STALE_CONVERSIONS;
+        uint32_t now = timer_read_time();
+        for (uint8_t i = 0; i < hx711s->sensor_count; i++) {
+            if (timer_is_before(hx711s->chips[i].counts_ticks + stale_ticks
+                                , now))
+                hx711s->have_counts &= ~(1 << i);
         }
         // The primary chip sets the sample rate. Its conversions are evenly
         // spaced, which is what the host clock tracking assumes, while the
