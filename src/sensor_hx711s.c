@@ -47,6 +47,9 @@ struct hx711s_adc {
     uint8_t have_counts;    // chips that have produced a reading
     uint32_t rest_ticks;
     uint32_t last_error;
+    int32_t last_good_sum;  // last sum forwarded to the probe trigger
+    int32_t spike_pending;  // held candidate sample (valid if spike_held)
+    uint8_t spike_held;     // a sample is being held for confirmation
     struct hx711s_chip chips[MAX_SENSORS];
     struct sensor_bulk sb;
     struct load_cell_probe *lce;
@@ -60,6 +63,9 @@ enum {
 #define SETTLE_CONVERSIONS 4
 #define STALE_CONVERSIONS 3
 #define SAMPLE_ERROR_DESYNC 1L << 31
+// ~55g on CC1 calibration: bigger than any real 1-sample acceleration
+// transient, far below the trigger force. Tunable later if needed.
+#define SPIKE_SUM_THRESHOLD 5775
 #define SAMPLE_ERROR_READ_TOO_LONG 1L << 30
 
 static struct task_wake wake_hx711s;
@@ -163,6 +169,30 @@ hx711s_sum(struct hx711s_adc *hx711s)
     int32_t sum = 0;
     for (uint8_t i = 0; i < hx711s->sensor_count; i++)
         sum += hx711s->chips[i].counts;
+    return sum;
+}
+
+// Impulse hold: a single-sample jump larger than the threshold is held
+// back one sample. Only a jump the next sample confirms (real motion
+// ramps) is forwarded (+1 sample of latency); a jump that vanishes
+// (EMI/vibration spike at motion start) is dropped and never reaches
+// the probe trigger.
+static int32_t
+hx711s_filter_spike(struct hx711s_adc *hx711s, int32_t sum)
+{
+    if (hx711s->spike_held) {
+        hx711s->spike_held = 0;
+        int32_t d = sum - hx711s->spike_pending;
+        if (d > SPIKE_SUM_THRESHOLD || d < -SPIKE_SUM_THRESHOLD)
+            return hx711s->last_good_sum;  // impulse: drop, keep baseline
+        return hx711s->spike_pending;      // confirmed ramp: forward held
+    }
+    int32_t d = sum - hx711s->last_good_sum;
+    if (d > SPIKE_SUM_THRESHOLD || d < -SPIKE_SUM_THRESHOLD) {
+        hx711s->spike_pending = sum;
+        hx711s->spike_held = 1;
+        return hx711s->last_good_sum;      // hold this round
+    }
     return sum;
 }
 
@@ -383,8 +413,10 @@ hx711s_capture_task(void)
             // reports would starve the probe watchdog and abort the homing
             // move instead.
             if (hx711s->last_error == 0 && hx711s->lce) {
-                load_cell_probe_report_sample(hx711s->lce,
-                                              hx711s_sum(hx711s));
+                int32_t sum = hx711s_filter_spike(hx711s
+                                                  , hx711s_sum(hx711s));
+                hx711s->last_good_sum = sum;
+                load_cell_probe_report_sample(hx711s->lce, sum);
             }
             // Add measurement to buffer
             add_sample(hx711s, oid, false);
