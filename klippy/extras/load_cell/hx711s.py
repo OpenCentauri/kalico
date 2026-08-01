@@ -34,6 +34,7 @@ class HX711SBase(LoadCellSensor):
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
         self.consecutive_fails = 0
+        self.sample_listeners = []
         self.sensor_type = sensor_type
         # Chip options
         ppins = printer.lookup_object("pins")
@@ -133,6 +134,11 @@ class HX711SBase(LoadCellSensor):
     def add_client(self, callback: BulkAdcDataCallback):
         self.batch_bulk.add_client(callback)
 
+    # beta tooling hook (mesh_soak): listeners get the converted
+    # per-channel sample tuples after each batch
+    def add_sample_listener(self, callback):
+        self.sample_listeners.append(callback)
+
     def attach_load_cell_probe(self, load_cell_probe_oid: int):
         self.attach_probe_cmd.send([self.oid, load_cell_probe_oid])
 
@@ -191,6 +197,9 @@ class HX711SBase(LoadCellSensor):
         prev_error_count = self.last_error_count
         samples = self.ffreader.pull_samples()
         self._convert_samples(samples)
+        if self.sample_listeners:
+            for cb in self.sample_listeners:
+                cb(samples)
         overflows = self.ffreader.get_last_overflows() - prev_overflows
         errors = self.last_error_count - prev_error_count
         if errors > 0:
