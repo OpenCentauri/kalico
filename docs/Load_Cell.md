@@ -25,6 +25,7 @@ reference_tare_counts: 12345
   * [`hx711`](Config_Reference.md#hx711)
   * [`hx717`](Config_Reference.md#hx717)
   * [`ads1220`](Config_Reference.md#ads1220)
+  * [`cs1237`](#cs1237-notes)
 
 - `counts_per_gram: 245`\
   _Default Value: None_\
@@ -403,3 +404,41 @@ These sensors are popular but have limitations:
 - Cannot communicate reset events to the MCU, hiding electrical faults
 - HX717 (320 Hz) strongly preferred over HX711 (80 Hz) for probing; limit HX711 probing speed to 2 mm/s
 - HX711 Sample rate is hardware-configured, not software-configurable; 10 SPS versions must be rewired for 80 SPS
+
+### CS1237 Notes
+
+The CS1237 is a 24-bit sigma-delta ADC with an integrated PGA, designed as a low-cost alternative to the HX711/HX717 family. It is a drop-in replacement in config — swap `sensor_type: hx711` for `sensor_type: cs1237` and rename `dout_pin` to `drdy_pin`. All calibration, tap validation, and probe logic is identical.
+
+**Key differences vs HX711/HX717:**
+- The data pin is named `drdy_pin` (data-ready, active-low), not `dout_pin`. It doubles as the serial data line per the CS1237 protocol.
+- Sample rates are `10 | 40 | 640 | 1280` SPS, defaulting to `1280` for normal probing speeds.
+
+**Switching from HX711 to CS1237:**
+
+```ini
+# HX711 example:
+[load_cell]
+sensor_type: hx711
+dout_pin: PA1
+sclk_pin: PA2
+sample_rate: 80
+gain: A-128
+
+# CS1237 example:
+[load_cell]
+sensor_type: cs1237
+drdy_pin: PA1
+sclk_pin: PA2
+sample_rate: 1280
+gain: 128
+ref_output_enable: False
+```
+
+**Rate recommendation:**
+The default `1280` SPS is appropriate for normal probing and matches the stock Elegoo Centauri Carbon 2 firmware and the [Qidi Q2 Mainline Kalico driver](https://github.com/MisterSheikh/Qidi_Q2_Mainline_Klipper/blob/d16a934f5a46395000b99100a15b220df01abf57/klipper_patch/klippy/extras/cs1237.py#L50-L53). `640` SPS can also be appropriate for probing when a lower rate is preferred. For scale use, set `sample_rate: 40`; that rate is too slow for normal probing speeds and can cause excessive overshoot force. The CS1237's 1280 SPS maximum exceeds HX717's 320 SPS maximum.
+
+**Firmware and wiring:**
+Enable **Support CS1237 ADC chip** in the MCU's `make menuconfig` before
+building and flashing firmware. The DRDY/DOUT pin is open-drain; the CS1237
+firmware enables its required internal pull-up, so configure the pin normally
+(for example, `drdy_pin: PA1`, without `^`).
